@@ -19,7 +19,7 @@ The trained model is committed in `backend/app/model/`, so you can run the app w
 ### 1. Clone
 
 ```bash
-git clone https://github.com/<your-username>/UPI_Fraud_Detection.git
+git clone https://github.com/PrathmeshPawar2110/UPI_Fraud_Detection.git
 cd UPI_Fraud_Detection
 ```
 
