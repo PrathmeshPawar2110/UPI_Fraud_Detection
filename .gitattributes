@@ -1,0 +1,4 @@
+* text=auto
+
+# Keep trained model files byte-for-byte.
+backend/app/model/* -text

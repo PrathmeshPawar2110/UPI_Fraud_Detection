@@ -1,0 +1,252 @@
+{
+  "dataset": "PaySim (Kaggle ealaxi/paysim1), TRANSFER + CASH_OUT, sender balance covers amount",
+  "rows_before_filter": 2770409,
+  "frauds_before_filter": 8213,
+  "features": [
+    "is_transfer",
+    "amount",
+    "hour",
+    "oldbalanceOrg",
+    "newbalanceOrig",
+    "amount_to_balance",
+    "drains_account",
+    "oldbalanceDest",
+    "newbalanceDest",
+    "errorBalanceDest"
+  ],
+  "split": {
+    "train_steps": "1-400",
+    "val_steps": "401-550",
+    "test_steps": "551-743",
+    "rows": {
+      "train": 251957,
+      "val": 18379,
+      "test": 11423
+    },
+    "frauds": {
+      "train": 4444,
+      "val": 1586,
+      "test": 2138
+    }
+  },
+  "thresholds": {
+    "high": 0.2778407546247565,
+    "medium": 0.06946018865618912
+  },
+  "best_iteration": 487,
+  "metrics_test": {
+    "with_receiver_balances": {
+      "pr_auc": 0.9999986910629268,
+      "roc_auc": 0.9999996977532488,
+      "recall_at_90_precision": 1.0,
+      "threshold": 0.2778407546247565,
+      "precision": 1.0,
+      "recall": 0.9990645463049579,
+      "f1": 0.9995320542817033,
+      "confusion": {
+        "tn": 9285,
+        "fp": 0,
+        "fn": 2,
+        "tp": 2136
+      }
+    },
+    "without_receiver_balances": {
+      "pr_auc": 0.9999834653874886,
+      "roc_auc": 0.9999960707922341,
+      "recall_at_90_precision": 1.0,
+      "threshold": 0.2778407546247565,
+      "precision": 1.0,
+      "recall": 0.9953227315247896,
+      "f1": 0.9976558837318332,
+      "confusion": {
+        "tn": 9285,
+        "fp": 0,
+        "fn": 10,
+        "tp": 2128
+      }
+    },
+    "baseline_isFlaggedFraud": {
+      "pr_auc": 0.20584962347296423,
+      "roc_auc": 0.5023386342376053,
+      "recall_at_90_precision": 0.004677268475210477,
+      "threshold": 0.5,
+      "precision": 1.0,
+      "recall": 0.004677268475210477,
+      "f1": 0.009310986964618248,
+      "confusion": {
+        "tn": 9285,
+        "fp": 0,
+        "fn": 2128,
+        "tp": 10
+      }
+    },
+    "baseline_amount_over_200k": {
+      "pr_auc": 0.4689522418565194,
+      "roc_auc": 0.7825899322614656,
+      "recall_at_90_precision": 0.0,
+      "threshold": 0.5,
+      "precision": 0.588716271463614,
+      "recall": 0.6735266604303087,
+      "f1": 0.6282722513089005,
+      "confusion": {
+        "tn": 8279,
+        "fp": 1006,
+        "fn": 698,
+        "tp": 1440
+      }
+    },
+    "baseline_empties_account": {
+      "pr_auc": 0.979824025026267,
+      "roc_auc": 0.9855004677268475,
+      "recall_at_90_precision": 0.971000935453695,
+      "threshold": 0.5,
+      "precision": 1.0,
+      "recall": 0.971000935453695,
+      "f1": 0.9852871381110584,
+      "confusion": {
+        "tn": 9285,
+        "fp": 0,
+        "fn": 62,
+        "tp": 2076
+      }
+    }
+  },
+  "feature_importance": [
+    [
+      "newbalanceOrig",
+      0.8208805401481607
+    ],
+    [
+      "drains_account",
+      0.12943139810300802
+    ],
+    [
+      "amount",
+      0.025323826805741988
+    ],
+    [
+      "amount_to_balance",
+      0.01821945536240262
+    ],
+    [
+      "oldbalanceOrg",
+      0.0038025105620132036
+    ],
+    [
+      "errorBalanceDest",
+      0.0008395239897467376
+    ],
+    [
+      "newbalanceDest",
+      0.0004922581580762338
+    ],
+    [
+      "hour",
+      0.0004114472217166089
+    ],
+    [
+      "oldbalanceDest",
+      0.0003074284911484
+    ],
+    [
+      "is_transfer",
+      0.00029161115798532436
+    ]
+  ],
+  "samples": {
+    "legit": [
+      {
+        "step": 563,
+        "type": "CASH_OUT",
+        "amount": 68265.53,
+        "oldbalanceOrg": 113384.0,
+        "newbalanceOrig": 45118.47,
+        "oldbalanceDest": 359667.29,
+        "newbalanceDest": 427932.82
+      },
+      {
+        "step": 667,
+        "type": "CASH_OUT",
+        "amount": 16008.37,
+        "oldbalanceOrg": 39043.0,
+        "newbalanceOrig": 23034.63,
+        "oldbalanceDest": 31520.35,
+        "newbalanceDest": 47528.72
+      },
+      {
+        "step": 567,
+        "type": "CASH_OUT",
+        "amount": 90591.19,
+        "oldbalanceOrg": 128620.78,
+        "newbalanceOrig": 38029.59,
+        "oldbalanceDest": 426713.51,
+        "newbalanceDest": 517304.7
+      },
+      {
+        "step": 592,
+        "type": "CASH_OUT",
+        "amount": 5659.98,
+        "oldbalanceOrg": 99868.0,
+        "newbalanceOrig": 94208.02,
+        "oldbalanceDest": 1081715.97,
+        "newbalanceDest": 1087375.95
+      },
+      {
+        "step": 571,
+        "type": "TRANSFER",
+        "amount": 11408.35,
+        "oldbalanceOrg": 228251.78,
+        "newbalanceOrig": 216843.43,
+        "oldbalanceDest": 93992.49,
+        "newbalanceDest": 105400.84
+      }
+    ],
+    "fraud": [
+      {
+        "step": 689,
+        "type": "CASH_OUT",
+        "amount": 228416.57,
+        "oldbalanceOrg": 228416.57,
+        "newbalanceOrig": 0.0,
+        "oldbalanceDest": 42676.83,
+        "newbalanceDest": 271093.4
+      },
+      {
+        "step": 569,
+        "type": "TRANSFER",
+        "amount": 176626.77,
+        "oldbalanceOrg": 176626.77,
+        "newbalanceOrig": 0.0,
+        "oldbalanceDest": 0.0,
+        "newbalanceDest": 0.0
+      },
+      {
+        "step": 588,
+        "type": "CASH_OUT",
+        "amount": 13421.28,
+        "oldbalanceOrg": 13421.28,
+        "newbalanceOrig": 0.0,
+        "oldbalanceDest": 218083.06,
+        "newbalanceDest": 231504.35
+      },
+      {
+        "step": 576,
+        "type": "CASH_OUT",
+        "amount": 884821.37,
+        "oldbalanceOrg": 884821.37,
+        "newbalanceOrig": 0.0,
+        "oldbalanceDest": 1628388.92,
+        "newbalanceDest": 2513210.29
+      },
+      {
+        "step": 724,
+        "type": "CASH_OUT",
+        "amount": 200482.72,
+        "oldbalanceOrg": 200482.72,
+        "newbalanceOrig": 0.0,
+        "oldbalanceDest": 254271.49,
+        "newbalanceDest": 454754.21
+      }
+    ]
+  }
+}
