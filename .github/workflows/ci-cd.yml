@@ -125,13 +125,24 @@ jobs:
           echo "### Deployed: $url" >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test the live API
         if: steps.secrets.outputs.ok == 'true'
+        env:
+          # Optional: Vercel > Project > Settings > Deployment Protection > Protection Bypass for Automation
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           url="${{ steps.deploy.outputs.url }}"
+          hdr=()
+          [ -n "$BYPASS" ] && hdr=(-H "x-vercel-protection-bypass: $BYPASS")
           for i in 1 2 3 4 5; do
-            code=$(curl -s -o /tmp/info.json -w '%{http_code}' "$url/api/model-info") && [ "$code" = 200 ] && break
+            code=$(curl -s "${hdr[@]}" -o /tmp/info.json -D /tmp/head.txt -w '%{http_code}' "$url/api/model-info") && [ "$code" = 200 ] && break
             sleep 5
           done
+          if [ "$code" != 200 ] && grep -qi '^location: https://vercel.com/sso-api' /tmp/head.txt; then
+            echo "::warning::Deployed, but Vercel Deployment Protection blocks the smoke test. Add a 'Protection Bypass for Automation' secret as VERCEL_AUTOMATION_BYPASS_SECRET to verify the live API."
+            echo "Smoke test skipped: deployment is protected by Vercel Authentication." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           [ "$code" = 200 ] || { echo "model-info returned $code"; cat /tmp/info.json; exit 1; }
-          curl -sf -X POST "$url/api/predict" -H 'Content-Type: application/json' \
+          curl -sf "${hdr[@]}" -X POST "$url/api/predict" -H 'Content-Type: application/json' \
             -d '{"type":"TRANSFER","amount":181000,"hour":3,"sender_balance_before":181000}' | tee /tmp/predict.json
           grep -q '"risk":"high"' /tmp/predict.json
+          echo "Smoke test passed: live API scored the test payment as high risk." >> "$GITHUB_STEP_SUMMARY"
