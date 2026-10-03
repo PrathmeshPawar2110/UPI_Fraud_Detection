@@ -76,7 +76,7 @@ This document describes how the system works end to end: the data, the model, th
 |---|---|---|
 | History, patterns, unified risk, investigation, scanners, cases, reports, alerts, graph, simulator, settings, learn, emergency | Built | Deterministic, testable, and deployable on Vercel |
 | Database | Postgres in production, SQLite locally and in tests | Vercel's filesystem is read-only except `/tmp`, which is wiped on cold start |
-| AI investigator | Built with the Claude API, opt-in | Needs an API key and consent, because data leaves the server |
+| AI investigator | Built, opt-in, with a choice of Anthropic, OpenAI, Azure OpenAI or Google Gemini | Needs an API key and consent, because data leaves the server |
 | Real-time stream | Browser timer calling the API | Vercel functions can't hold long-lived SSE or WebSocket connections |
 | QR scanning | jsQR in the browser, camera over HTTPS | The BarcodeDetector API isn't supported in every browser |
 | URL redirect following | Not done | Fetching user-supplied URLs from the server is a server-side request forgery risk |
@@ -205,7 +205,9 @@ No UI framework, CSS framework or state library is used: plain React state and c
 | `predictor.py` (own code) | | Pure-Python tree inference and TreeSHAP for the exported model; no LightGBM, NumPy or SciPy at runtime |
 | SQLAlchemy | 2.1.3 (`>=2.0`) | ORM and database engine (Postgres in production, SQLite locally) |
 | psycopg (binary) | 3.3.6 (`>=3.2`) | Postgres driver |
-| anthropic | 1.11.0 (`>=0.40`) | Claude API client for the AI investigator |
+| anthropic | 1.11.0 (`>=0.40`) | AI investigator: Anthropic provider |
+| openai | 3.24.0 (`>=1.50`) | AI investigator: OpenAI, Azure OpenAI (`AzureOpenAI` client) and Gemini (OpenAI-compatible endpoint) |
+| python-dotenv | (`>=1.0`, local only) | Loads `backend/.env` in development |
 | Standard library | `hashlib.scrypt`, `hmac` | Password hashing and signed session cookies (no auth dependency) |
 
 The deployed function's packages (root `requirements.txt`) unpack to about 56 MB, well within Vercel's limit.
@@ -264,6 +266,7 @@ UPI_Fraud_Detection/
 │   │   ├── models.py             ORM tables (§17)
 │   │   ├── auth.py               scrypt passwords, signed session cookies, login throttle, /api/auth
 │   │   ├── services.py           shared per-user operations: history, scoring, alerts, related, rescoring
+│   │   ├── llm.py                AI providers (Anthropic, OpenAI, Azure OpenAI, Gemini), selection, tool loops
 │   │   ├── schemas.py            original Pydantic models: Transaction, ReceivedPayment, Prediction
 │   │   ├── fraud.py              feature row, scoring, SHAP → reasons, risk bands, fast predict
 │   │   ├── predictor.py          pure-Python tree inference + TreeSHAP (port of LightGBM's)
@@ -288,7 +291,7 @@ UPI_Fraud_Detection/
 │   │   │   ├── alerts.py         alerts and guidance
 │   │   │   ├── network.py        graph endpoints
 │   │   │   ├── simulator.py      scenarios, demo data, live stream
-│   │   │   ├── ai.py             AI investigator (Claude, tools, citation check)
+│   │   │   ├── ai.py             AI investigator (tools, citation check, route)
 │   │   │   └── account.py        settings, export, deletion, retention, model monitoring
 │   │   └── model/
 │   │       ├── trees.json        exported trees, served by the API (~0.35 MB)
@@ -301,7 +304,7 @@ UPI_Fraud_Detection/
 │       ├── test_engine.py        pattern detectors and unified risk properties
 │       ├── test_scanners.py      message / URL / QR / UPI scanners, redaction
 │       ├── test_platform.py      auth, transactions, import, access control, cases, reports, graph, security
-│       └── test_ai.py            AI investigator with a fake Claude client
+│       └── test_ai.py            AI investigator: provider selection, all providers with fake clients
 │
 └── frontend/
     ├── index.html                page shell, fonts, favicon
@@ -727,12 +730,12 @@ The look is "paper and ink", modelled on bank receipts and ledgers rather than g
 - **The anonymous checker stores nothing:** without an account, the reference details (transaction ID, names, UPI IDs) stay in the browser and nothing is written to the database.
 - **With an account:** saved transactions, cases, notes, alerts and reports are stored and visible only to that account ([§18](#18-accounts-sessions-and-access-control)). Export, deletion and automatic retention are in Settings.
 - **Never requested or stored:** UPI PIN, OTP, CVV, card numbers or bank passwords. No request schema has such a field (a test checks the whole OpenAPI schema), and evidence and notes are passed through `redact.py`, which masks OTP/PIN/CVV digits and card numbers before saving.
-- **AI:** opt-in, consent per user, daily limit, and only the records its tools return are sent to the Claude API ([§26](#26-ai-investigator)).
+- **AI:** opt-in, consent per user, daily limit, and only the records its tools return are sent to the configured AI provider, which is named to the user before they consent ([§26](#26-ai-investigator)).
 - **Community reports:** others see only distinct-reporter counts per category; reporters and descriptions are never shown ([§22.5](#225-community-reports)).
 - **Input validation:** Pydantic constrains every field (types, ranges, finite numbers, allowed values, UPI ID and reference formats). Invalid input returns HTTP 400 with a short message, never a stack trace. Request bodies over 1 MB are rejected with 413.
 - **Headers:** `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` (camera only for this site), HSTS on Vercel, `Cache-Control: no-store` on API responses, and a Content-Security-Policy that allows only this site plus the OCR CDNs and Google Fonts. The CSP is identical in FastAPI and `vercel.json` (checked by a test) and was verified against real in-browser OCR.
 - **CORS** is restricted to the dev origin. On Vercel, the UI and API share one origin.
-- **Secrets:** `SECRET_KEY`, `DATABASE_URL` and the optional `ANTHROPIC_API_KEY` are Vercel environment variables; the three deploy values are GitHub repository secrets. Pull requests from forks don't receive them, so they can't deploy.
+- **Secrets:** `SECRET_KEY`, `DATABASE_URL` and the optional AI provider keys are Vercel environment variables; the three deploy values are GitHub repository secrets. Pull requests from forks don't receive them, so they can't deploy.
 - **Rate limiting:** login is throttled in the database (5 failures per email per 15 minutes) and AI questions are capped per user per day. General request rate limiting is left to the hosting platform (in-memory counters don't work across serverless instances).
 
 ---
@@ -806,8 +809,13 @@ In development only Vite needs to listen on the network. API calls from the phon
 |---|---|---|---|
 | `DATABASE_URL` | In production | local `backend/upi_guard.db` (SQLite); `/tmp` SQLite on Vercel previews | Postgres connection string (`postgres://` and `postgresql://` are both accepted) |
 | `SECRET_KEY` | In production | random per process (sessions end on restart) | Signs session cookies; use a long random value |
-| `ANTHROPIC_API_KEY` | No | unset (AI disabled) | Enables the AI investigator |
-| `AI_MODEL` | No | `claude-opus-5-5` | Claude model for the AI investigator |
+| `AI_PROVIDER` | No | first provider with a key (anthropic → openai → azure → gemini) | `anthropic`, `openai`, `azure` or `gemini` |
+| `AI_MODEL` | For OpenAI and Gemini | `claude-opus-5-5` for Anthropic | Model name (Azure uses the deployment instead) |
+| `ANTHROPIC_API_KEY` | For Anthropic | unset | Anthropic API key |
+| `OPENAI_API_KEY` | For OpenAI | unset | OpenAI API key |
+| `GEMINI_API_KEY` | For Gemini | unset | Google AI Studio key (used with the OpenAI-compatible endpoint) |
+| `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT` | For Azure | unset | Key, `https://<resource>.openai.azure.com` and deployment name |
+| `AZURE_OPENAI_API_VERSION` | No | `2024-10-21` | Azure OpenAI API version |
 | `AI_DAILY_LIMIT` | No | 20 | AI questions per user per day |
 | `SESSION_DAYS` | No | 7 | Session cookie lifetime |
 | `MAX_BODY_BYTES` | No | 1,000,000 | Request size limit |
@@ -848,7 +856,7 @@ flowchart LR
 
 The workflow cancels in-progress runs for the same branch and has read-only repository permissions.
 
-**One-time setup:** see "Deployment" in the [README](../README.md#deployment-vercel-with-cicd-on-github-actions). In short: `npx vercel login` and `npx vercel link` once, create a token, and add `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (from `.vercel/project.json`) as repository secrets. For UPI Guard, also create a Postgres database and set `DATABASE_URL` and `SECRET_KEY` (and optionally `ANTHROPIC_API_KEY`) as Vercel environment variables before the first production deploy.
+**One-time setup:** see "Deployment" in the [README](../README.md#deployment-vercel-with-cicd-on-github-actions). In short: `npx vercel login` and `npx vercel link` once, create a token, and add `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (from `.vercel/project.json`) as repository secrets. For UPI Guard, also create a Postgres database and set `DATABASE_URL` and `SECRET_KEY` (and optionally one AI provider's variables) as Vercel environment variables before the first production deploy.
 
 **Runtime behaviour.** A cold start loads FastAPI and the trees (about 0.25 s for the model). A warm request scores in about 30 ms. The OCR still runs in the visitor's browser, so the function only receives numbers.
 
@@ -859,7 +867,7 @@ The workflow cancels in-progress runs for the same branch and has read-only repo
 ### 14.1 Automated tests (run in CI on every push and pull request)
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 151 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 164 tests
 cd frontend && npm test                                                  # 8 tests
 ```
 
@@ -870,7 +878,7 @@ cd frontend && npm test                                                  # 8 tes
 | `backend/tests/test_engine.py` | 21 | Each pattern fires on its case and not on near-misses, never on too little history, and only looks backwards in time; noisy-OR properties; the model calibration keeps its thresholds; with no history the unified level equals `/api/predict` (backward compatibility); the breakdown sums to the score; balance depletion isn't double-counted; reputation alone never reaches high; history can't suppress a serious signal |
 | `backend/tests/test_scanners.py` | 53 | 11 scam message types (English, Hinglish, Devanagari) and a benign message; 10 URL verdicts, malformed URLs, punycode, secret parameters; QR parsing, receive-trick and invalid payee; UPI ID validation including injection-like strings and lure words without false positives on names; OTP/PIN/card redaction; scanner API limits |
 | `backend/tests/test_platform.py` | 52 | Sign-up, login, logout, cookie flags, throttling, tampered sessions; create / validate / search / review / delete; another user gets 404 on every ID-based endpoint; CSV import with errors and missing columns; bulk rows explained on first view; notes; case workflow and incident report with masked secrets; community reports aggregate-only and withdrawable; reports feed the risk score; alerts; all 9 scenarios detected; demo data, graph cycles and device flags; live stream; settings, export, retention, account deletion; model monitoring; security headers, size limit, unknown API paths, CSP parity, CORS; no credential fields anywhere in the API schema |
-| `backend/tests/test_ai.py` | 7 | Consent required; not configured → 503; the tool loop feeds real stored evidence back and verifies citations (unknown IDs flagged); tools can't read another user's data; unknown tools return errors; daily limit; status |
+| `backend/tests/test_ai.py` | 20 | Consent required; not configured → 503 naming the missing variable; provider selection for 9 configurations (auto-detect, explicit choice, missing model, endpoint or key, unsupported provider; secrets never echoed); Gemini schema conversion and strict OpenAI tools; the Anthropic loop feeds real stored evidence back and verifies citations; the OpenAI-compatible loop for OpenAI, Azure and Gemini (system message, token parameter, tool-call IDs, unknown tools, invalid JSON arguments); tools can't read another user's data; error mapping; daily limit; status |
 | `frontend/src/lib/ocrParse.test.js` | 8 | Paytm received, PhonePe received, Google Pay sent, BHIM sent (modelled on real OCR output, with made-up names and numbers), GPay received heading, PhonePe "Paid to", failed status with lakh grouping, and nulls for unrecognisable text |
 | CI runtime check | 1 | The API scores correctly in a venv with only the deployed dependencies |
 | CI smoke test | 1 | After a production deploy, the live API answers `model-info` and scores an emptied account as high risk |
@@ -891,7 +899,7 @@ cd frontend && npm test                                                  # 8 tes
 
 - No test checks that `train_model.build_features` and `fraud.build_row` produce identical vectors.
 - No browser test runs in CI, so OCR on real images and the platform UI are checked by hand (the walkthrough script isn't in the repo).
-- The AI investigator is tested with a fake client; a real Claude call needs an API key and was not run.
+- The AI investigator is tested with fake clients for all four providers; real calls need API keys and were not run, so check your chosen provider and model once after configuring it.
 - The first real Vercel deployment (with Postgres) has to be checked after the secrets and environment variables are added; the smoke test then runs on every production deploy.
 
 ---
@@ -930,7 +938,8 @@ cd frontend && npm test                                                  # 8 tes
 | Add a history pattern | A detector in `engine/patterns.py` returning a `Pattern` with evidence and a weight; tests in `test_engine.py`; add its code to `ALERT_PATTERNS` in `services.py` if it should alert |
 | Add a scam-message indicator | A tuple in `INDICATORS` in `engine/message.py` and a case in `test_scanners.py` |
 | Add a simulator scenario | An entry in `_scenarios()` in `engine/simulator.py`; the parametrised test checks it is detected |
-| Change the AI model or limits | `AI_MODEL` / `AI_DAILY_LIMIT` environment variables |
+| Change the AI provider, model or limits | `AI_PROVIDER`, `AI_MODEL`, the provider's key variables, `AI_DAILY_LIMIT` |
+| Add another AI provider | A provider class in `llm.py` with `run(system, tools, messages, execute, deadline)` (an OpenAI-compatible service can reuse `OpenAICompatProvider` with a new base URL), plus a row in `PROVIDERS`, `_key_for` and the tests |
 | Change colours or type | Tokens at the top of `styles.css`; fonts in `index.html`; platform pages in `platform.css` |
 
 ---
@@ -1084,12 +1093,21 @@ It checks the format (`[a-z0-9][a-z0-9._-]{1,255}@[a-z][a-z0-9]{1,63}`) and maps
 
 [routes/ai.py](../backend/app/routes/ai.py) is an AI layer that explains evidence the deterministic system already produced. It never decides fraud on its own.
 
-- **Opt-in:** the user enables it in Settings (consent is audit-logged) and every request repeats `consent: true`. Without `ANTHROPIC_API_KEY` the feature reports "not configured" (503) and the rest of the app works.
-- **Model and request:** `claude-opus-5-5` by default (`AI_MODEL`), effort `low` for interactive latency, the server-side refusal fallback (`fallbacks: "default"`), the system prompt marked for prompt caching, `max_tokens` 4,000, a 40 s client timeout with 1 retry, up to 6 tool rounds and a 50 s overall deadline (the function's limit is 60 s).
+- **Opt-in:** the user enables it in Settings (consent is audit-logged) and every request repeats `consent: true`. Settings and the AI panel name the configured provider and model before consent. Without a configured provider the feature reports "not configured" (503) with the missing variable, and the rest of the app works.
+- **Providers** ([llm.py](../backend/app/llm.py)), chosen by `AI_PROVIDER` or, if unset, the first provider with a key (anthropic → openai → azure → gemini). Each provider runs the **same** tool loop over the **same** tools, so the safety properties below don't depend on the model:
+
+  | Provider | Client | Request details |
+  |---|---|---|
+  | `anthropic` | Anthropic SDK, Messages API | `claude-opus-5-5` by default (`AI_MODEL` to change), effort `low`, server-side refusal fallback (`fallbacks: "default"`), system prompt marked for prompt caching, strict tools, `max_tokens` 4,000 |
+  | `openai` | OpenAI SDK, Chat Completions | `AI_MODEL` required; function tools with `strict: true`; `max_completion_tokens` 4,000 |
+  | `azure` | OpenAI SDK `AzureOpenAI(azure_endpoint, api_version, api_key)` | model = `AZURE_OPENAI_DEPLOYMENT`; otherwise as OpenAI |
+  | `gemini` | OpenAI SDK with `base_url = https://generativelanguage.googleapis.com/v1beta/openai/` | `AI_MODEL` required; schemas converted to Gemini's subset (no type unions → `nullable`, no `additionalProperties`, no `strict`); `max_tokens` 4,000 |
+
+  All providers use a 40 s client timeout with 1 retry, up to 6 tool rounds and a 50 s overall deadline (the function's limit is 60 s). Tool arguments that aren't valid JSON return an error result to the model instead of crashing. Only Anthropic has a built-in default model: OpenAI and Gemini model names change often, so they must be set explicitly.
 - **Tools** (strict JSON schemas, all scoped to the signed-in user): `get_transaction` (facts plus the full risk breakdown, computing SHAP if needed), `search_transactions` (amount, direction, risk, counterparty, pattern code, date range, sort, ≤ 50 rows), `get_related`, `get_case`, `get_profile` (baseline, risk counts, top counterparties) and `check_upi`. A record belonging to another user returns "not found", the same as a missing one.
 - **No invented facts:** the system prompt requires every fact to be cited as `[tx#ID]` or `[case#ID]` and forbids guessing or calling anyone a criminal. After the answer, the server checks each citation against the IDs the tools actually returned in this request: verified ones become evidence links, and unknown ones are marked "not found in your data" and listed as unverified.
 - **Conversation:** up to 6 earlier text turns are resent (no tool history); the tool loop appends content unchanged.
-- **Errors:** rate limit → 429, timeout → 504, connection or API error → 502, refusal → a polite decline. The per-user daily limit (default 20) is counted from the audit log.
+- **Errors** (mapped the same way for both SDKs): rate limit → 429, timeout → 504, connection or API error → 502, refusal or content filter → a polite decline. The per-user daily limit (default 20) is counted from the audit log.
 - **Not built:** free-form SQL or database access for the model, and storing AI answers.
 
 ## 27. Frontend application

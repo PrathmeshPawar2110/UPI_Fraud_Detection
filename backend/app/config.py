@@ -51,10 +51,17 @@ if not SECRET_KEY:
 
 SESSION_DAYS = int(_env("SESSION_DAYS", "7"))
 
-# Claude API for the AI investigator (feature is disabled when the key is missing).
-ANTHROPIC_API_KEY = _env("ANTHROPIC_API_KEY")
-AI_MODEL = _env("AI_MODEL", "claude-opus-5-5")
+# AI investigator (disabled when no provider is configured). See app/llm.py.
+AI_PROVIDER = _env("AI_PROVIDER").lower()        # anthropic | openai | azure | gemini (empty = first key found)
+AI_MODEL = _env("AI_MODEL")                      # required for openai / gemini; anthropic defaults to claude-opus-5-5
 AI_DAILY_LIMIT = int(_env("AI_DAILY_LIMIT", "20"))  # questions per user per day (cost control)
+ANTHROPIC_API_KEY = _env("ANTHROPIC_API_KEY")
+OPENAI_API_KEY = _env("OPENAI_API_KEY")
+GEMINI_API_KEY = _env("GEMINI_API_KEY")
+AZURE_OPENAI_API_KEY = _env("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_ENDPOINT = _env("AZURE_OPENAI_ENDPOINT")        # https://<resource>.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT = _env("AZURE_OPENAI_DEPLOYMENT")    # your model deployment name
+AZURE_OPENAI_API_VERSION = _env("AZURE_OPENAI_API_VERSION", "2024-10-21")
 
 # Request limits
 MAX_BODY_BYTES = int(_env("MAX_BODY_BYTES", str(1_000_000)))

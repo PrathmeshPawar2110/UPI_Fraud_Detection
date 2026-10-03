@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ErrorNote, PageHead, Synthetic } from "../components/ui.jsx";
 import * as api from "../lib/api.js";
@@ -12,7 +12,9 @@ export default function Settings() {
   const [error, setError] = useState(null);
   const [password, setPassword] = useState("");
   const [aa, setAa] = useState("idle"); // mock Account Aggregator flow
+  const [ai, setAi] = useState(null);   // which AI provider the server uses (for informed consent)
   const s = user.settings || {};
+  useEffect(() => { api.aiStatus().then(setAi).catch(() => {}); }, []);
 
   async function save(body, note) {
     setError(null);
@@ -71,8 +73,9 @@ export default function Settings() {
       <section className="settings-block" id="ai">
         <h2>AI investigator</h2>
         <p>When on, the questions you ask and the transaction records needed to answer them (amounts, dates, names, UPI IDs,
-          risk evidence) are sent to Anthropic's Claude API. Nothing is sent until you ask a question. Your PIN, OTP and
-          passwords are never stored, so they can't be sent.</p>
+          risk evidence) are sent to {ai?.configured ? <b>{ai.provider_label}'s API ({ai.model})</b> : "the AI provider configured on this server"}.
+          Nothing is sent until you ask a question. Your PIN, OTP and passwords are never stored, so they can't be sent.</p>
+        {ai && !ai.configured && <p className="note">The AI investigator isn't set up on this server, so turning this on has no effect yet.</p>}
         <label className="switch"><input type="checkbox" checked={!!s.ai_consent} onChange={(e) => save({ ai_consent: e.target.checked }, e.target.checked ? "AI investigator on." : "AI investigator off.")} />
           <span>Allow the AI investigator to read my transaction evidence</span></label>
       </section>

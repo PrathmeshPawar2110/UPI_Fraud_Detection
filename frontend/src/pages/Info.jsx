@@ -21,7 +21,9 @@ export function Privacy() {
         category. Never who reported it or what you wrote. Reports are unverified and are not an official list.</p>
       <h2>AI investigator</h2>
       <p>Off by default. When you turn it on and ask a question, the question and the records needed to answer it are
-        sent to Anthropic's Claude API. There's a daily limit per user.</p>
+        sent to the AI provider this server is configured with (Anthropic, OpenAI, Azure OpenAI or Google Gemini; the
+        provider is named in Settings before you turn it on). The model only receives records returned by tools scoped
+        to your account. There's a daily limit per user.</p>
       <h2>Your controls</h2>
       <p>Export everything as JSON, delete your history, set automatic deletion, or delete your account in
         <Link to="/settings"> Settings</Link>.</p>

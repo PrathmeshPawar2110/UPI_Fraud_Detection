@@ -37,13 +37,14 @@ export default function AiPanel({ transactionId, caseId, suggestions }) {
         <p className="muted">The AI investigator isn't set up on this server. Everything else works without it.</p>
       ) : !status.consent ? (
         <p className="muted">
-          Off. When you turn it on, your question and the transactions it needs are sent to Anthropic's Claude API to
-          write an explanation. <Link to="/settings#ai">Turn on in Settings →</Link>
+          Off. When you turn it on, your question and the transactions it needs are sent to {status.provider_label}'s API
+          ({status.model}) to write an explanation. <Link to="/settings#ai">Turn on in Settings →</Link>
         </p>
       ) : (
         <>
           <p className="note">Explains the evidence UPI Guard already found, citing your transactions. It can't see other
-            users' data and doesn't decide if something is fraud. {status.used_today}/{status.daily_limit} questions today.</p>
+            users' data and doesn't decide if something is fraud. Using {status.provider_label} · {status.model} ·{" "}
+            {status.used_today}/{status.daily_limit} questions today.</p>
           {turns.map((t, i) => <Answer key={i} q={t.q} a={t.a} />)}
           {turns.length === 0 && suggestions?.length > 0 && (
             <div className="chips-row">

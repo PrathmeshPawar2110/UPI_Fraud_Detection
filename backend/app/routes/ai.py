@@ -1,8 +1,10 @@
-"""AI Investigator: answers questions about the user's own transaction evidence with Claude.
+"""AI Investigator: answers questions about the user's own transaction evidence with an LLM.
 
-Safety design:
-- Opt-in: the user must enable AI in Settings (data is sent to Anthropic) and confirm per request.
-- Claude reads data only through the tools below, each scoped to the signed-in user. It never sees
+The provider (Anthropic, OpenAI, Azure OpenAI or Gemini) is chosen by configuration; see app/llm.py.
+
+Safety design (identical for every provider):
+- Opt-in: the user must enable AI in Settings (data is sent to the AI provider) and confirm per request.
+- The model reads data only through the tools below, each scoped to the signed-in user. It never sees
   the database directly and never sees other users' data.
 - It must cite every fact as [tx#ID] / [case#ID]; the server checks each citation against the
   records the tools actually returned and flags anything it can't match.
@@ -21,7 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import config, services as S
+from .. import config, llm, services as S
 from ..auth import audit, current_user
 from ..db import get_db
 from ..engine import patterns as P, upi as U
@@ -29,7 +31,6 @@ from ..models import AuditLog, Case, Note, Transaction, User
 
 router = APIRouter(prefix="/api/ai", tags=["ai investigator"])
 
-MAX_TOOL_ROUNDS = 6
 DEADLINE_SECONDS = 50  # stay inside the serverless function limit (vercel.json maxDuration)
 
 SYSTEM = """You are UPI Guard's fraud investigator. You help one user understand their own UPI transactions.
@@ -93,14 +94,6 @@ class AskBody(BaseModel):
     transaction_id: Optional[int] = None
     case_id: Optional[int] = None
     history: list[Turn] = Field(default_factory=list, max_length=6)
-
-
-def get_client():
-    """Separated so tests can replace it. Returns None when AI isn't configured."""
-    if not config.ANTHROPIC_API_KEY:
-        return None
-    import anthropic
-    return anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=40.0, max_retries=1)
 
 
 # ---------- tools (all scoped to `user`) ----------
@@ -255,8 +248,10 @@ def check_citations(text: str, tools: Tools) -> tuple[str, list[dict], list[str]
 
 @router.get("/status")
 def status(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return {"configured": bool(config.ANTHROPIC_API_KEY), "consent": bool((user.settings or {}).get("ai_consent")),
-            "model": config.AI_MODEL, "daily_limit": config.AI_DAILY_LIMIT, "used_today": _used_today(db, user)}
+    s = llm.status()
+    return {"configured": s["configured"], "provider": s["provider"], "provider_label": s.get("provider_label"),
+            "model": s["model"], "reason": s["reason"], "consent": bool((user.settings or {}).get("ai_consent")),
+            "daily_limit": config.AI_DAILY_LIMIT, "used_today": _used_today(db, user)}
 
 
 def _used_today(db: Session, user: User) -> int:
@@ -269,14 +264,13 @@ def _used_today(db: Session, user: User) -> int:
 def ask(body: AskBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if not body.consent or not (user.settings or {}).get("ai_consent"):
         raise HTTPException(status_code=403, detail="Turn on the AI investigator in Settings first. Your question and "
-                                                    "the transaction data it needs are sent to Anthropic's API.")
-    client = get_client()
-    if client is None:
-        raise HTTPException(status_code=503, detail="The AI investigator isn't configured on this server (no API key).")
+                                                    "the transaction data it needs are sent to the AI provider's API.")
+    provider = llm.get_provider()
+    if provider is None:
+        raise HTTPException(status_code=503, detail="The AI investigator isn't configured on this server. "
+                                                    + (llm.status()["reason"] or ""))
     if _used_today(db, user) >= config.AI_DAILY_LIMIT:
         raise HTTPException(status_code=429, detail=f"Daily limit of {config.AI_DAILY_LIMIT} AI questions reached.")
-
-    import anthropic
 
     tools = Tools(db, user)
     focus = []
@@ -292,50 +286,16 @@ def ask(body: AskBody, user: User = Depends(current_user), db: Session = Depends
     audit(db, user.id, "ai.ask", transaction_id=body.transaction_id, case_id=body.case_id)
     db.commit()
 
-    started, calls, response = time.monotonic(), [], None
     try:
-        for _ in range(MAX_TOOL_ROUNDS):
-            if time.monotonic() - started > DEADLINE_SECONDS:
-                break
-            response = client.beta.messages.create(
-                model=config.AI_MODEL,
-                max_tokens=4000,
-                system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
-                tools=TOOLS,
-                messages=messages,
-                output_config={"effort": "low"},
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
-            )
-            if response.stop_reason != "tool_use":
-                break
-            messages.append({"role": "assistant", "content": response.content})  # append-only, blocks unchanged
-            results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    out = tools.run(block.name, block.input)
-                    calls.append({"tool": block.name, "input": block.input})
-                    results.append({"type": "tool_result", "tool_use_id": block.id,
-                                    "content": json.dumps(out, default=str)[:30_000],
-                                    **({"is_error": True} if "error" in out else {})})
-            messages.append({"role": "user", "content": results})
-    except anthropic.RateLimitError:
-        raise HTTPException(status_code=429, detail="The AI service is busy. Try again in a minute.")
-    except anthropic.APITimeoutError:
-        raise HTTPException(status_code=504, detail="The AI investigator took too long. Try a narrower question.")
-    except anthropic.APIConnectionError:
-        raise HTTPException(status_code=502, detail="Couldn't reach the AI service.")
-    except anthropic.APIStatusError as e:
-        raise HTTPException(status_code=502, detail=f"AI service error ({e.status_code}).")
+        ans = provider.run(SYSTEM, TOOLS, messages, tools.run, deadline=time.monotonic() + DEADLINE_SECONDS)
+    except llm.LLMError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
 
-    if response is None:
-        raise HTTPException(status_code=504, detail="The AI investigator took too long.")
-    if response.stop_reason == "refusal":
-        return {"answer": "The AI declined to answer this question.", "evidence": [], "unverified": [],
-                "tool_calls": calls, "model": getattr(response, "model", config.AI_MODEL)}
-    text = "\n".join(b.text for b in response.content if b.type == "text").strip()
-    if response.stop_reason == "tool_use":
+    base = {"tool_calls": ans.calls, "model": ans.model, "provider": provider.name}
+    if ans.refused:
+        return {"answer": "The AI declined to answer this question.", "evidence": [], "unverified": [], **base}
+    text = ans.text
+    if ans.stopped_early:
         text = (text + "\n\n" if text else "") + "(Stopped after too many lookups. Try a more specific question.)"
     text, cited, unverified = check_citations(text, tools)
-    return {"answer": text or "No answer.", "evidence": cited, "unverified": unverified, "tool_calls": calls,
-            "model": getattr(response, "model", config.AI_MODEL)}
+    return {"answer": text or "No answer.", "evidence": cited, "unverified": unverified, **base}

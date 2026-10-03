@@ -7,7 +7,7 @@
 | **Check** | Upload a GPay / PhonePe / Paytm / BHIM screenshot (read in the browser) or type the details. Get a risk level with reasons from an ML model (sent money) or rules (received money) |
 | **Detect** | Save payments or import a CSV. A pattern engine compares each one with your history: rapid transfers, new recipient, unusual amount or time, balance drain, repeated payments to a new payee, paying back a recent sender, new device |
 | **Explain** | A unified 0–100 risk score shows the points each source added: model (TreeSHAP reasons), rules, patterns, community reports |
-| **Investigate** | Timeline, related payments, counterparty profile, notes, review status, and an opt-in AI investigator (Claude) that explains the stored evidence with verified citations |
+| **Investigate** | Timeline, related payments, counterparty profile, notes, review status, and an opt-in AI investigator (Anthropic Claude, OpenAI, Azure OpenAI or Google Gemini) that explains the stored evidence with verified citations |
 | **Connect** | Relationship graph with flagged entities, circular money flows and suspicious clusters |
 | **Scan** | Suspicious SMS / WhatsApp messages (English, Hinglish), payment links (never opened), QR codes (camera or image) and UPI IDs |
 | **Report & act** | Cases with evidence and a printable incident report, community reports (aggregate counts only), alerts, emergency steps (1930, cybercrime.gov.in, Chakshu) |
@@ -17,7 +17,7 @@ UPI Guard never asks for a UPI PIN, OTP or bank password, labels all synthetic d
 
 The model is LightGBM trained on **PaySim**, as recommended in [data-and-scope.md](data-and-scope.md). It trains on 2,51,957 of PaySim's 63.6 lakh transactions: transfers and cash-outs where the sender's balance covers the amount, steps 1-400. The other rows hold almost no fraud: `CASH_IN`, `PAYMENT` and `DEBIT` have none, and the transfers and cash-outs where the balance doesn't cover the amount hold 45 of the 8,213 frauds (0.5%). The app can't receive those transactions anyway, because a real UPI payment can't exceed the balance.
 
-**Stack:** React 19 + Vite + React Router (`frontend/`) · FastAPI + SQLAlchemy (Postgres / SQLite) + LightGBM-exported model (`backend/`) · Tesseract.js and jsQR in the browser · Claude API (optional) · Vercel + GitHub Actions
+**Stack:** React 19 + Vite + React Router (`frontend/`) · FastAPI + SQLAlchemy (Postgres / SQLite) + LightGBM-exported model (`backend/`) · Tesseract.js and jsQR in the browser · optional LLM (Anthropic / OpenAI / Azure OpenAI / Gemini) · Vercel + GitHub Actions
 
 Full technical details (architecture, data model, engines, API, security, limitations) are in the **[Technical Reference Document](docs/TRD.md)**.
 
@@ -66,8 +66,31 @@ Options:
 |---|---|---|
 | `DATABASE_URL` | local SQLite file | Postgres connection string (required in production) |
 | `SECRET_KEY` | random per start (you're signed out on restart) | Signs session cookies (required in production) |
-| `ANTHROPIC_API_KEY` | unset (AI off) | Enables the AI investigator |
-| `AI_MODEL` / `AI_DAILY_LIMIT` | `claude-opus-5-5` / 20 | AI model and questions per user per day |
+| `AI_PROVIDER` | first provider with a key | `anthropic`, `openai`, `azure` or `gemini` |
+| `AI_MODEL` | `claude-opus-5-5` for Anthropic; **required** for OpenAI and Gemini | Model name |
+| `AI_DAILY_LIMIT` | 20 | AI questions per user per day |
+| Provider keys | unset (AI off) | See the AI investigator table below |
+
+### AI investigator: choose a provider
+
+Set **one** provider's key (plus `AI_MODEL` where needed). With none set, the AI investigator is off and everything else works. The same user-scoped tools, citation checks, consent and daily limit apply to every provider.
+
+| Provider | `AI_PROVIDER` | Required variables | Get a key |
+|---|---|---|---|
+| Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` (`AI_MODEL` optional, default `claude-opus-5-5`) | <https://console.anthropic.com> |
+| OpenAI | `openai` | `OPENAI_API_KEY`, `AI_MODEL` (a current chat model with tool calling) | <https://platform.openai.com/api-keys> |
+| Google Gemini | `gemini` | `GEMINI_API_KEY`, `AI_MODEL` (e.g. a current Gemini Flash / Pro model) | <https://aistudio.google.com/apikey> |
+| Azure OpenAI | `azure` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` (`https://<resource>.openai.azure.com`), `AZURE_OPENAI_DEPLOYMENT` (your deployment name); optional `AZURE_OPENAI_API_VERSION` (default `2024-10-21`) | Azure portal → your Azure OpenAI resource → Keys and Endpoint |
+
+Example `backend/.env` for Gemini:
+
+```ini
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your-key
+AI_MODEL=gemini-model-name-from-ai-studio
+```
+
+If something is missing, the AI panel (and `GET /api/ai/status`) says exactly which variable to set. Anthropic is called through its own SDK. OpenAI, Azure OpenAI and Gemini all use the official `openai` SDK; Gemini goes through [Google's OpenAI-compatible endpoint](https://ai.google.dev/gemini-api/docs/openai).
 
 If `uvicorn` is "not recognized", the virtual environment isn't active or the dependencies weren't installed into it. Run it through the venv's Python instead:
 
@@ -155,7 +178,7 @@ Commit all three files in `backend/app/model/`. The API serves `trees.json`, and
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 151 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 164 tests
 cd frontend && npm test                                                  # 8 OCR parser tests
 ```
 
@@ -163,14 +186,14 @@ cd frontend && npm test                                                  # 8 OCR
 - **Predictor parity:** the pure-Python model matches LightGBM's probabilities (to 1e-12) and SHAP values (to 1e-9) on 320 rows.
 - **Engines:** every history pattern and its near-misses, unified-risk properties (never below the strongest signal, model-only results unchanged, no double counting), scanners for 11 message scam types, 10 URL verdicts, QR tricks and UPI IDs, secret masking.
 - **Platform:** sign-up and sessions, login throttling, another user gets 404 on every record, CSV import, cases and incident reports, aggregate-only community reports, all 9 simulator scenarios, graph cycles, settings, export and deletion, security headers, CSP parity with `vercel.json`, no PIN / OTP fields anywhere in the API.
-- **AI investigator:** with a fake Claude client: consent, user-scoped tools, citation checking, daily limit.
+- **AI investigator:** with fake Anthropic and OpenAI-style clients: provider selection and missing-setting messages, the tool loop for all four providers, Gemini schema conversion, consent, user-scoped tools, citation checking, error mapping, daily limit.
 - **OCR parser:** receipts for each app with typical OCR noise (made-up names and numbers).
 
 ## Deployment (Vercel, with CI/CD on GitHub Actions)
 
 The whole app runs on Vercel: the React build as static files, and the FastAPI backend as one Python serverless function ([api/index.py](api/index.py)) under the same domain, so `/api` works with no CORS setup.
 
-**The live model runs without LightGBM.** LightGBM plus NumPy and SciPy unpack to ~190 MB, close to Vercel's function size limit, and LightGBM needs the system OpenMP library (`libgomp`). Instead, `train_model.py` exports the trees to `trees.json`, and [predictor.py](backend/app/predictor.py) runs them in pure Python: the same prediction and the same TreeSHAP explanations, checked against LightGBM in the tests. The deployed function needs only FastAPI, SQLAlchemy, the Postgres driver and the Claude SDK (root [requirements.txt](requirements.txt), ~56 MB). It scores a request in ~30 ms.
+**The live model runs without LightGBM.** LightGBM plus NumPy and SciPy unpack to ~190 MB, close to Vercel's function size limit, and LightGBM needs the system OpenMP library (`libgomp`). Instead, `train_model.py` exports the trees to `trees.json`, and [predictor.py](backend/app/predictor.py) runs them in pure Python: the same prediction and the same TreeSHAP explanations, checked against LightGBM in the tests. The deployed function needs only FastAPI, SQLAlchemy, the Postgres driver and the Anthropic and OpenAI SDKs (root [requirements.txt](requirements.txt)). It scores a request in ~30 ms.
 
 **Data needs Postgres in production.** Vercel's filesystem is read-only (only `/tmp`, wiped on cold start), so production stops at start-up without `DATABASE_URL`. Preview deployments without it use a throwaway SQLite database in `/tmp`.
 
@@ -206,7 +229,7 @@ Vercel's own Git auto-deploy is turned off in [vercel.json](vercel.json), so not
    |---|---|
    | `DATABASE_URL` | the Postgres connection string |
    | `SECRET_KEY` | a long random string, e.g. from `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
-   | `ANTHROPIC_API_KEY` | optional: enables the AI investigator (billed per use, capped by `AI_DAILY_LIMIT`) |
+   | AI provider variables | optional: one provider from the [AI investigator table](#ai-investigator-choose-a-provider) (billed per use, capped by `AI_DAILY_LIMIT`) |
 
    Tables are created automatically on first start.
 7. Push to `main`, or re-run the workflow from the **Actions** tab. The production URL appears on the run and in the Vercel dashboard.
@@ -330,7 +353,7 @@ backend/
   app/predictor.py                   pure-Python tree inference + TreeSHAP (no lightgbm at runtime)
   app/received.py                    rule-based check for money received
   app/model/                         trees.json (served), fraud_model.txt (LightGBM), meta.json
-  tests/                             151 tests: API, engines, scanners, platform, AI, predictor parity
+  tests/                             164 tests: API, engines, scanners, platform, AI, predictor parity
 
 frontend/
   vite.config.js                     dev server, proxies /api to the backend
