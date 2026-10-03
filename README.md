@@ -2,7 +2,7 @@
 
 A web app that estimates whether a UPI transaction looks like fraud. The user uploads a payment screenshot (or types the details), confirms a few fields, and gets a risk level with plain-English reasons.
 
-The model is LightGBM trained on **PaySim**, as recommended in [data-and-scope.md](data-and-scope.md).
+The model is LightGBM trained on **PaySim**, as recommended in [data-and-scope.md](data-and-scope.md). It trains on 2,51,957 of PaySim's 63.6 lakh transactions: transfers and cash-outs where the sender's balance covers the amount, steps 1-400. The other rows hold almost no fraud: `CASH_IN`, `PAYMENT` and `DEBIT` have none, and the transfers and cash-outs where the balance doesn't cover the amount hold 45 of the 8,213 frauds (0.5%). The app can't receive those transactions anyway, because a real UPI payment can't exceed the balance.
 
 **Stack:** React 19 + Vite (`frontend/`) · FastAPI + LightGBM (`backend/`) · Tesseract.js for in-browser OCR
 
@@ -31,7 +31,7 @@ python -m venv .venv
 # Windows:      .venv\Scripts\activate
 # macOS/Linux:  source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --reload-dir app --port 8000
 ```
 
 The API runs at http://127.0.0.1:8000. Interactive API docs are at http://127.0.0.1:8000/docs.
@@ -40,8 +40,10 @@ If `uvicorn` is "not recognized", the virtual environment isn't active or the de
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --reload-dir app --port 8000
 ```
+
+`--reload-dir app` makes the server watch only the code in `app/`. Without it, uvicorn also watches the thousands of files in `.venv` and keeps restarting whenever OneDrive or pip touches them.
 
 ### 3. Frontend (React)
 

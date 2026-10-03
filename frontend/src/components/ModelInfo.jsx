@@ -20,7 +20,8 @@ export default function ModelInfo({ info, failed }) {
     body = (
       <>
         <p style={{ margin: 0 }}>
-          LightGBM trained on {fmt(info.split.rows.train)} PaySim transfers and cash-outs, tested on{" "}
+          LightGBM trained on {fmt(info.split.rows.train)} of PaySim's 63.6 lakh transactions: transfers and
+          cash-outs where the sender's balance covers the amount (99.5% of all frauds), steps 1-400. Tested on{" "}
           {fmt(info.split.rows.test)} later transactions ({fmt(info.split.frauds.test)} frauds) it never saw.
         </p>
         <table>
