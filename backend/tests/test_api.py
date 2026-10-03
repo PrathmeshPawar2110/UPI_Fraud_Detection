@@ -90,5 +90,5 @@ def test_vercel_entrypoint_exposes_the_app():
     spec = importlib.util.spec_from_file_location("vercel_index", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    routes = {r.path for r in module.app.routes}
+    routes = set(module.app.openapi()["paths"])
     assert {"/api/predict", "/api/check-received", "/api/model-info"} <= routes

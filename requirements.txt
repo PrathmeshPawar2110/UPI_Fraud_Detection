@@ -2,3 +2,6 @@
 # The model is served in pure Python (backend/app/predictor.py), so no lightgbm / numpy / scipy here.
 # Local backend: backend/requirements.txt.  Tests: backend/requirements-dev.txt.  Training: requirements-train.txt.
 fastapi>=0.115
+sqlalchemy>=2.0          # database (Postgres in production, SQLite locally)
+psycopg[binary]>=3.2     # Postgres driver
+anthropic>=0.40          # AI investigator (only used when ANTHROPIC_API_KEY is set)

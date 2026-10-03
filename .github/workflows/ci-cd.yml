@@ -47,7 +47,7 @@ jobs:
           from app.schemas import Transaction
           res = score(Transaction(type="TRANSFER", amount=181000, hour=3, sender_balance_before=181000))
           assert res["risk"] == "high", res
-          print("ok:", res["risk"], round(res["probability"], 4), sorted(r.path for r in app.routes if r.path.startswith("/api")))
+          print("ok:", res["risk"], round(res["probability"], 4), len(app.openapi()["paths"]), "API paths")
           EOF
 
   frontend:

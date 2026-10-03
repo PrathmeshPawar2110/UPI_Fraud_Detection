@@ -1,30 +1,66 @@
-"""UPI Fraud Check: FastAPI backend.
+"""UPI Guard: FastAPI backend.
 
-Run (from backend/):  uvicorn app.main:app --reload --port 8000
+Run (from backend/):  uvicorn app.main:app --reload --reload-dir app --port 8000
 API docs:             http://127.0.0.1:8000/docs
+
+The original endpoints (/api/predict, /api/check-received, /api/model-info) are unchanged and need no
+account. Everything that stores data lives in app/routes and requires a signed-in user.
 """
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 
+from . import config
+from .auth import router as auth_router
+from .db import init_db
 from .fraud import META, score
 from .received import check_received
+from .routes import account, ai, alerts, cases, intel, network, simulator, transactions
 from .schemas import Prediction, ReceivedPayment, Transaction
 
-app = FastAPI(title="UPI Fraud Check API")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="UPI Guard API", lifespan=lifespan)
 
 # The Vite dev server proxies /api, but allow direct calls from it too.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type"],
 )
+
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(self), microphone=(), geolocation=()",
+}
+
+
+@app.middleware("http")
+async def limits_and_headers(request: Request, call_next):
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > config.MAX_BODY_BYTES:
+        return JSONResponse(status_code=413, content={"detail": "Request is too large."})
+    response = await call_next(request)
+    for k, v in SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
 
 FIELD_LABELS = {
     "type": "Payment type",
@@ -50,6 +86,10 @@ async def validation_error(_: Request, exc: RequestValidationError):
         msg = "Payment type must be a transfer or a cash withdrawal."
     elif field:
         msg = f"{FIELD_LABELS[field]}: {msg[0].lower() + msg[1:]}."
+    else:
+        name = next((p for p in reversed(err["loc"]) if isinstance(p, str) and p not in ("body", "query", "path")), None)
+        if name:
+            msg = f"{name.replace('_', ' ').capitalize()}: {msg[0].lower() + msg[1:]}."
     return JSONResponse(status_code=400, content={"detail": msg})
 
 
@@ -70,7 +110,23 @@ def check_received_payment(p: ReceivedPayment):
     return check_received(p)
 
 
+for r in (auth_router, transactions.router, intel.router, cases.router, alerts.router, network.router,
+          simulator.router, ai.router, account.router):
+    app.include_router(r)
+
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PATCH", "DELETE"], include_in_schema=False)
+def api_not_found(path: str):
+    return JSONResponse(status_code=404, content={"detail": "Not found."})
+
+
 # Serve the built React app (frontend/dist) when it exists, so one process can run everything.
+# Unknown paths fall back to index.html so client-side routes like /transactions work on reload.
 DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if DIST.is_dir():
-    app.mount("/", StaticFiles(directory=DIST, html=True), name="frontend")
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str):
+        file = (DIST / path).resolve()
+        if path and file.is_file() and DIST in file.parents:
+            return FileResponse(file)
+        return FileResponse(DIST / "index.html")

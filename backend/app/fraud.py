@@ -114,6 +114,18 @@ def meter_position(p: float) -> float:
     return 2 / 3 + (p - T_HIGH) / (1 - T_HIGH) / 3
 
 
+def band(p: float) -> str:
+    return "high" if p >= T_HIGH else "medium" if p >= T_MED else "low"
+
+
+def predict_only(t: Transaction) -> dict:
+    """Probability and band without SHAP reasons (fast path for bulk scoring)."""
+    row, dest_known = build_row(t)
+    p = MODEL.predict([float(row[f]) for f in FEATURES])
+    return {"probability": p, "risk": band(p), "meter": meter_position(p), "reasons": [],
+            "used_receiver_balances": dest_known}
+
+
 def score(t: Transaction) -> dict:
     row, dest_known = build_row(t)
     x = [float(row[f]) for f in FEATURES]
