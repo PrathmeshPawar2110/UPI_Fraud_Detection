@@ -36,6 +36,13 @@ uvicorn app.main:app --reload --port 8000
 
 The API runs at http://127.0.0.1:8000. Interactive API docs are at http://127.0.0.1:8000/docs.
 
+If `uvicorn` is "not recognized", the virtual environment isn't active or the dependencies weren't installed into it. Run it through the venv's Python instead:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+```
+
 ### 3. Frontend (React)
 
 In a second terminal:
@@ -47,6 +54,14 @@ npm run dev
 ```
 
 Open **http://localhost:5173**. The Vite dev server forwards `/api` requests to the backend on port 8000, so start the backend first.
+
+**Windows:** if PowerShell says "running scripts is disabled on this system" for `npm` (or for `.venv\Scripts\Activate.ps1`), allow local scripts for your user once, then open a new terminal:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+Alternatively, use `npm.cmd` (e.g. `npm.cmd run dev`), which skips the blocked `npm.ps1` wrapper.
 
 ### Run as a single server (optional)
 
