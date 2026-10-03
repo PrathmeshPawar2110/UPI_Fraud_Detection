@@ -800,7 +800,7 @@ In development only Vite needs to listen on the network. API calls from the phon
 | Vercel build, function, routing | `vercel.json` | see [§13.6](#136-deployment-vercel-and-cicd) |
 | Deploy credentials | GitHub repository secrets | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` |
 
-**Environment variables** ([config.py](../backend/app/config.py)):
+**Environment variables** ([config.py](../backend/app/config.py)). Locally they can also be set in `backend/.env` (template: `backend/.env.example`; git-ignored), loaded with python-dotenv at start-up. Real environment variables take precedence; the tests set `UPIG_NO_DOTENV=1` so a developer's file (and real API key) never leaks into them; on Vercel no file exists.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|

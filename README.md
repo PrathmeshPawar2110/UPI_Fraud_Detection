@@ -51,7 +51,16 @@ uvicorn app.main:app --reload --reload-dir app --port 8000
 
 The API runs at http://127.0.0.1:8000. Interactive API docs are at http://127.0.0.1:8000/docs.
 
-Locally, data is stored in a SQLite file, `backend/upi_guard.db` (git-ignored), created on first start. No setup is needed. Optional environment variables:
+Locally, data is stored in a SQLite file, `backend/upi_guard.db` (git-ignored), created on first start. No setup is needed.
+
+To set options, copy `backend/.env.example` to `backend/.env` and fill it in. The file is git-ignored and loaded on start; real environment variables override it:
+
+```powershell
+cd backend
+copy .env.example .env      # macOS/Linux: cp .env.example .env
+```
+
+Options:
 
 | Variable | Default | Purpose |
 |---|---|---|

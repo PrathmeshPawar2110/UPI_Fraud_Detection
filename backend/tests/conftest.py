@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 _db = Path(tempfile.mkdtemp()) / "test.db"
+os.environ["UPIG_NO_DOTENV"] = "1"  # never load a developer's backend/.env (real keys) into tests
 os.environ["DATABASE_URL"] = f"sqlite:///{_db}"
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.pop("ANTHROPIC_API_KEY", None)

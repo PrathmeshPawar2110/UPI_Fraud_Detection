@@ -1,9 +1,22 @@
-"""Settings from environment variables (all optional for local development)."""
+"""Settings from environment variables (all optional for local development).
+
+Locally, values can also come from backend/.env (see backend/.env.example). Real environment
+variables always win over the file, and on Vercel the file doesn't exist, so nothing changes there.
+"""
 
 import os
 import secrets
 import warnings
 from pathlib import Path
+
+ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+if ENV_FILE.is_file() and not os.environ.get("UPIG_NO_DOTENV"):  # tests set UPIG_NO_DOTENV
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # python-dotenv comes with uvicorn[standard]; skip quietly if absent
+        pass
+    else:
+        load_dotenv(ENV_FILE, override=False)
 
 
 def _env(name: str, default: str = "") -> str:

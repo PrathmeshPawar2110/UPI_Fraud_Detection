@@ -1,3 +1,7 @@
 # local development database
 *.db
 *.db-journal
+
+# local secrets (the template is committed)
+.env
+!.env.example
