@@ -51,7 +51,7 @@ This document describes how the system works end to end: the data, the model, th
 | Sent money, cash withdrawal | LightGBM model trained on PaySim | PaySim labels outgoing account-takeover fraud |
 | Received money | Transparent rules | PaySim has no labelled scams on incoming money |
 
-**Out of scope.** Real-time integration with banks or NPCI, user accounts, storing transactions, and production deployment. No public dataset of labelled real UPI fraud exists, so the model is trained on a synthetic analogue (see [Â§5](#5-data)).
+**Out of scope.** Real-time integration with banks or NPCI, user accounts, storing transactions, and production deployment. No public dataset of labelled real UPI fraud exists, so the model is trained on a synthetic analogue (see [§5](#5-data)).
 
 ---
 
@@ -69,7 +69,7 @@ flowchart LR
         R[Result slip]
     end
     subgraph "FastAPI backend"
-        A1 --> M["fraud.py<br/>features â†’ LightGBM â†’ SHAP reasons"]
+        A1 --> M["fraud.py<br/>features → LightGBM → SHAP reasons"]
         A2 --> RR["received.py<br/>scam rules"]
         MI["GET /api/model-info"] --> META[(meta.json)]
         M --> MODEL[(fraud_model.txt)]
@@ -95,10 +95,10 @@ sequenceDiagram
     User->>UI: drop / paste screenshot
     UI->>OCR: recognize(image, PSM 11)
     OCR-->>UI: text + word boxes
-    UI->>UI: parseUpiText â†’ fill form (outlined green)
+    UI->>UI: parseUpiText → fill form (outlined green)
     User->>UI: add balance before, press Check
     UI->>API: POST /api/predict {type, amount, hour, balances}
-    API->>API: Pydantic validation (amount â‰¤ balance)
+    API->>API: Pydantic validation (amount ≤ balance)
     API->>LGB: predict + pred_contrib (SHAP)
     LGB-->>API: probability, contributions
     API-->>UI: {probability, risk, meter, reasons}
@@ -154,43 +154,43 @@ scikit-learn is deliberately not used. On the development machine, Windows Appli
 
 ```
 UPI_Fraud_Detection/
-â”œâ”€â”€ README.md                     quick start, API summary, results
-â”œâ”€â”€ data-and-scope.md             dataset comparison and why PaySim was chosen
-â”œâ”€â”€ docs/
-â”‚   â””â”€â”€ TRD.md                    this document
-â”œâ”€â”€ requirements.txt              training dependencies (pandas, numpy, lightgbm)
-â”œâ”€â”€ train_model.py                data filtering, features, training, evaluation, export
-â”œâ”€â”€ Dataset/                      PaySim CSV goes here (git-ignored, ~470 MB)
-â”‚
-â”œâ”€â”€ backend/
-â”‚   â”œâ”€â”€ requirements.txt          API dependencies
-â”‚   â””â”€â”€ app/
-â”‚       â”œâ”€â”€ __init__.py
-â”‚       â”œâ”€â”€ main.py               FastAPI app: routes, CORS, error handler, serves frontend/dist
-â”‚       â”œâ”€â”€ schemas.py            Pydantic models: Transaction, ReceivedPayment, Prediction
-â”‚       â”œâ”€â”€ fraud.py              model loading, feature row, SHAP â†’ reasons, risk bands
-â”‚       â”œâ”€â”€ received.py           rule-based check for received money
-â”‚       â””â”€â”€ model/
-â”‚           â”œâ”€â”€ fraud_model.txt   trained LightGBM model (text format, ~0.5 MB)
-â”‚           â””â”€â”€ meta.json         features, thresholds, split, metrics, sample transactions
-â”‚
-â””â”€â”€ frontend/
-    â”œâ”€â”€ index.html                page shell, fonts, favicon
-    â”œâ”€â”€ package.json              scripts: dev, build, preview
-    â”œâ”€â”€ vite.config.js            port 5173, proxies /api â†’ 127.0.0.1:8000
-    â””â”€â”€ src/
-        â”œâ”€â”€ main.jsx              React entry point
-        â”œâ”€â”€ App.jsx               form state, OCR â†’ form mapping, validation, API calls, samples
-        â”œâ”€â”€ styles.css            design tokens, light/dark themes, all component styles
-        â”œâ”€â”€ components/
-        â”‚   â”œâ”€â”€ UploadCard.jsx    01: drop / choose / paste screenshot, runs OCR
-        â”‚   â”œâ”€â”€ TransactionForm.jsx 02: payment type, fields, received-money questions
-        â”‚   â”œâ”€â”€ ResultCard.jsx    03: result slip (stamp, score, scale, reasons, advice)
-        â”‚   â””â”€â”€ ModelInfo.jsx     "About the model": training summary and test metrics
-        â””â”€â”€ lib/
-            â”œâ”€â”€ ocrParse.js       OCR text + word boxes â†’ payment fields
-            â”œâ”€â”€ api.js            fetch helpers for the three endpoints
-            â””â”€â”€ format.js         â‚¹ formatting, datetime-local helpers
+├── README.md                     quick start, API summary, results
+├── data-and-scope.md             dataset comparison and why PaySim was chosen
+├── docs/
+│   └── TRD.md                    this document
+├── requirements.txt              training dependencies (pandas, numpy, lightgbm)
+├── train_model.py                data filtering, features, training, evaluation, export
+├── Dataset/                      PaySim CSV goes here (git-ignored, ~470 MB)
+│
+├── backend/
+│   ├── requirements.txt          API dependencies
+│   └── app/
+│       ├── __init__.py
+│       ├── main.py               FastAPI app: routes, CORS, error handler, serves frontend/dist
+│       ├── schemas.py            Pydantic models: Transaction, ReceivedPayment, Prediction
+│       ├── fraud.py              model loading, feature row, SHAP → reasons, risk bands
+│       ├── received.py           rule-based check for received money
+│       └── model/
+│           ├── fraud_model.txt   trained LightGBM model (text format, ~0.5 MB)
+│           └── meta.json         features, thresholds, split, metrics, sample transactions
+│
+└── frontend/
+    ├── index.html                page shell, fonts, favicon
+    ├── package.json              scripts: dev, dev:network, build, preview
+    ├── vite.config.js            port 5173, proxies /api → 127.0.0.1:8000
+    └── src/
+        ├── main.jsx              React entry point
+        ├── App.jsx               form state, OCR → form mapping, validation, API calls, samples
+        ├── styles.css            design tokens, light/dark themes, all component styles
+        ├── components/
+        │   ├── UploadCard.jsx    01: drop / choose / paste screenshot, runs OCR
+        │   ├── TransactionForm.jsx 02: payment type, fields, received-money questions
+        │   ├── ResultCard.jsx    03: result slip (stamp, score, scale, reasons, advice)
+        │   └── ModelInfo.jsx     "About the model": training summary and test metrics
+        └── lib/
+            ├── ocrParse.js       OCR text + word boxes → payment fields
+            ├── api.js            fetch helpers for the three endpoints
+            └── format.js         ₹ formatting, datetime-local helpers
 ```
 
 Git-ignored: `Dataset/`, `*.csv`, virtual environments, `node_modules/`, `frontend/dist/`, `.env*`, editor folders.
@@ -212,13 +212,13 @@ Columns used: `step` (hour of simulation), `type`, `amount`, `oldbalanceOrg`, `n
 | Stage | Rows | Frauds | Reason |
 |---|---|---|---|
 | Full dataset | 6,362,620 | 8,213 | |
-| `CASH_IN`, `PAYMENT`, `DEBIT` removed | âˆ’3,592,211 | 0 | These types contain no fraud at all |
+| `CASH_IN`, `PAYMENT`, `DEBIT` removed | −3,592,211 | 0 | These types contain no fraud at all |
 | `TRANSFER` + `CASH_OUT` | 2,770,409 | 8,213 | |
 | Realistic-rows filter | **281,759** | **8,168** (99.5%) | See below |
 
-**Realistic-rows filter:** `oldbalanceOrg > 0` **and** `amount â‰¤ oldbalanceOrg + 1`. It removes 2,488,650 rows, which hold only 45 frauds (41 of them have a zero sender balance).
+**Realistic-rows filter:** `oldbalanceOrg > 0` **and** `amount ≤ oldbalanceOrg + 1`. It removes 2,488,650 rows, which hold only 45 frauds (41 of them have a zero sender balance).
 
-Why it exists: in about 90% of legitimate PaySim transfers, the amount exceeds the sender's balance and the balances do not add up. That is a bookkeeping artefact of the simulator, while 99.5% of frauds add up exactly. A model trained on all rows learns "balances add up â†’ fraud", which would flag every real user, because real balances always add up. The filter keeps only transactions a real user could enter. The API enforces the same rule (amount â‰¤ balance), so the model never sees inputs outside its training domain. After filtering, `errorBalanceOrig` is about 0 everywhere, so it is not used.
+Why it exists: in about 90% of legitimate PaySim transfers, the amount exceeds the sender's balance and the balances do not add up. That is a bookkeeping artefact of the simulator, while 99.5% of frauds add up exactly. A model trained on all rows learns "balances add up → fraud", which would flag every real user, because real balances always add up. The filter keeps only transactions a real user could enter. The API enforces the same rule (amount ≤ balance), so the model never sees inputs outside its training domain. After filtering, `errorBalanceOrig` is about 0 everywhere, so it is not used.
 
 ### 5.3 Time-based split
 
@@ -226,9 +226,9 @@ Splitting by time (not randomly) tests the model on transactions that happen aft
 
 | Split | Steps | Rows | Frauds |
 |---|---|---|---|
-| Train | 1â€“400 | 251,957 | 4,444 |
-| Validation | 401â€“550 | 18,379 | 1,586 |
-| Test | 551â€“743 | 11,423 | 2,138 |
+| Train | 1–400 | 251,957 | 4,444 |
+| Validation | 401–550 | 18,379 | 1,586 |
+| Test | 551–743 | 11,423 | 2,138 |
 
 Validation is used for early stopping and for choosing thresholds. The test set is touched only once, for the final metrics.
 
@@ -248,12 +248,12 @@ The same logic exists twice: vectorised in `train_model.build_features` and for 
 | `amount` | transaction amount | |
 | `hour` | `step % 24` | In the app: the hour of the payment's date/time |
 | `oldbalanceOrg` | sender balance before | |
-| `newbalanceOrig` | sender balance after | App default: `max(before âˆ’ amount, 0)` |
+| `newbalanceOrig` | sender balance after | App default: `max(before − amount, 0)` |
 | `amount_to_balance` | `amount / (oldbalanceOrg + 1)` | Share of the balance sent |
 | `drains_account` | 1 if `newbalanceOrig == 0` and `oldbalanceOrg > 0` | Account emptied |
 | `oldbalanceDest` | receiver balance before | Optional, NaN when unknown |
 | `newbalanceDest` | receiver balance after | Optional, NaN when unknown |
-| `errorBalanceDest` | `oldbalanceDest + amount âˆ’ newbalanceDest` | Money that "vanished" at the receiver |
+| `errorBalanceDest` | `oldbalanceDest + amount − newbalanceDest` | Money that "vanished" at the receiver |
 
 **Receiver balances are optional.** A real user rarely knows the receiver's balance, so the three receiver features are set to NaN for a random 50% of training rows and 50% of validation rows (`MASK_RATE = 0.5`, seed 42). LightGBM handles missing values natively, so one model scores well with or without them.
 
@@ -271,7 +271,7 @@ LightGBM binary classifier:
 | `feature_fraction` | 0.9 | |
 | `bagging_fraction` / `bagging_freq` | 0.8 / 1 | |
 | `metric` | `binary_logloss` | Average precision hits 1.0 after one tree, so early stopping uses log-loss |
-| `monotone_constraints` | `newbalanceOrig: âˆ’1`, `amount_to_balance: +1`, `drains_account: +1` | Sending a larger share, or leaving less behind, can never lower the score |
+| `monotone_constraints` | `newbalanceOrig: −1`, `amount_to_balance: +1`, `drains_account: +1` | Sending a larger share, or leaving less behind, can never lower the score |
 | `num_boost_round` | up to 500, early stopping after 50 rounds without improvement | Best iteration: **487** |
 | `seed` | 42 | |
 
@@ -283,8 +283,8 @@ Both thresholds are chosen on the validation set only:
 
 | Band | Threshold | Rule |
 |---|---|---|
-| High risk | probability â‰¥ **0.2778** | Threshold with the best F1 on validation |
-| Medium risk | probability â‰¥ **0.0695** | Lowest threshold that still reaches 99.5% recall on validation (falls back to high Ã· 4 if that would not be below high) |
+| High risk | probability ≥ **0.2778** | Threshold with the best F1 on validation |
+| Medium risk | probability ≥ **0.0695** | Lowest threshold that still reaches 99.5% recall on validation (falls back to high ÷ 4 if that would not be below high) |
 | Low risk | below 0.0695 | |
 
 ### 6.4 Metrics
@@ -322,7 +322,7 @@ Implemented in NumPy: average precision (PR-AUC), rank-based ROC-AUC, precision/
 | `best_iteration` | 487 |
 | `metrics_test` | Model (with / without receiver balances) and the three baselines |
 | `feature_importance` | `[feature, share]` pairs, sorted |
-| `samples` | 5 legit (score < medium) and 5 fraud (score â‰¥ high) test transactions for the "Or try" buttons |
+| `samples` | 5 legit (score < medium) and 5 fraud (score ≥ high) test transactions for the "Or try" buttons |
 
 ---
 
@@ -346,15 +346,15 @@ Implemented in NumPy: average precision (PR-AUC), rank-based ROC-AUC, precision/
 |---|---|---|
 | `type` | `"TRANSFER"` \| `"CASH_OUT"` | required |
 | `amount` | float | > 0, finite |
-| `hour` | int | 0â€“23 |
-| `sender_balance_before` | float | â‰¥ 0, finite |
-| `sender_balance_after` | float \| null | â‰¥ 0; defaults to `max(before âˆ’ amount, 0)` |
-| `receiver_balance_before` | float \| null | â‰¥ 0 |
-| `receiver_balance_after` | float \| null | â‰¥ 0 |
+| `hour` | int | 0–23 |
+| `sender_balance_before` | float | ≥ 0, finite |
+| `sender_balance_after` | float \| null | ≥ 0; defaults to `max(before − amount, 0)` |
+| `receiver_balance_before` | float \| null | ≥ 0 |
+| `receiver_balance_after` | float \| null | ≥ 0 |
 
-Model validator: `amount â‰¤ sender_balance_before + 1`. A UPI payment cannot exceed the balance, and it keeps inputs inside the training domain ([Â§5.2](#52-filtering)).
+Model validator: `amount ≤ sender_balance_before + 1`. A UPI payment cannot exceed the balance, and it keeps inputs inside the training domain ([§5.2](#52-filtering)).
 
-**`ReceivedPayment`**: `amount` (> 0), `hour` (0â€“23), `knows_sender`, `in_bank`, `asked_to_pay`, each `"yes"` \| `"no"` \| `"unsure"`.
+**`ReceivedPayment`**: `amount` (> 0), `hour` (0–23), `knows_sender`, `in_bank`, `asked_to_pay`, each `"yes"` \| `"no"` \| `"unsure"`.
 
 **`Prediction`**:
 
@@ -362,7 +362,7 @@ Model validator: `amount â‰¤ sender_balance_before + 1`. A UPI payment canno
 |---|---|---|
 | `probability` | float \| null | Model probability of fraud; `null` for the rules path |
 | `risk` | `"low"` \| `"medium"` \| `"high"` | Risk band |
-| `meter` | float 0â€“1 | Marker position on the 3-band scale |
+| `meter` | float 0–1 | Marker position on the 3-band scale |
 | `reasons` | `[{text, direction: "up"\|"down"}]` | Up to 4 plain-English reasons |
 | `used_receiver_balances` | bool | Whether both receiver balances were given |
 | `method` | `"model"` \| `"rules"` | Which path scored it |
@@ -370,7 +370,7 @@ Model validator: `amount â‰¤ sender_balance_before + 1`. A UPI payment canno
 ### 7.3 Scoring flow ([fraud.py](../backend/app/fraud.py))
 
 1. **Load once at import:** the booster from `fraud_model.txt`, and `features` and `thresholds` from `meta.json`.
-2. **`build_row`:** turns a `Transaction` into the feature dict in [Â§6.1](#61-features). Receiver features are used only when **both** receiver balances are given, otherwise NaN.
+2. **`build_row`:** turns a `Transaction` into the feature dict in [§6.1](#61-features). Receiver features are used only when **both** receiver balances are given, otherwise NaN.
 3. **Predict:** `MODEL.predict(x)` gives the probability.
 4. **Explain:** `MODEL.predict(x, pred_contrib=True)` gives per-feature SHAP contributions in log-odds (LightGBM's built-in TreeSHAP). They are summed into five groups:
 
@@ -382,11 +382,11 @@ Model validator: `amount â‰¤ sender_balance_before + 1`. A UPI payment canno
    | type | `is_transfer` |
    | receiver | the three receiver features (skipped when unknown) |
 
-   Each group becomes a sentence whose wording depends on the values and on the sign of the contribution (for example, "It sends the entire balance (â‚¹2,00,483) and leaves the account at â‚¹0â€¦"). Groups with |contribution| â‰¥ 0.1 are kept, sorted by size, at most 4. If none reach 0.1, the top 2 are shown.
-5. **Band:** high if p â‰¥ 0.2778, medium if p â‰¥ 0.0695, else low.
+   Each group becomes a sentence whose wording depends on the values and on the sign of the contribution (for example, "It sends the entire balance (₹2,00,483) and leaves the account at ₹0…"). Groups with |contribution| ≥ 0.1 are kept, sorted by size, at most 4. If none reach 0.1, the top 2 are shown.
+5. **Band:** high if p ≥ 0.2778, medium if p ≥ 0.0695, else low.
 6. **Meter:** each band takes a third of the scale, and p is placed linearly inside its band, so the marker is readable even though scores cluster near 0 and 1.
 
-Amounts in reasons use Indian digit grouping (`â‚¹12,34,567`).
+Amounts in reasons use Indian digit grouping (`₹12,34,567`).
 
 ### 7.4 Errors, CORS and serving
 
@@ -413,12 +413,12 @@ Amounts in reasons use Indian digit grouping (`â‚¹12,34,567`).
 |---|---|
 | `in_bank = no` | high |
 | `asked_to_pay = yes` | high |
-| `knows_sender = no` and amount â‰¥ â‚¹50,000 | high |
+| `knows_sender = no` and amount ≥ ₹50,000 | high |
 | `knows_sender = no` or `unsure` | medium |
 | `in_bank = unsure` | medium |
 | otherwise | low |
 
-A night-time note (hour 0â€“5) is added as a reason when the sender isn't known, but it doesn't change the band. Reasons are ranked by weight and capped at 4. The response has `probability: null`, `method: "rules"`, and a fixed meter position per band (1/6, 1/2, 5/6).
+A night-time note (hour 0–5) is added as a reason when the sender isn't known, but it doesn't change the band. Reasons are ranked by weight and capped at 4. The response has `probability: null`, `method: "rules"`, and a fixed meter position per band (1/6, 1/2, 5/6).
 
 **Design choice:** receiving money cannot by itself take money out of the account, so an unexpected credit is "medium" (worth care), and "high" needs a stronger sign. This matches the brief: received payments from strangers are suspicious, but less threatening than outgoing fraud.
 
@@ -430,14 +430,14 @@ A night-time note (hour 0â€“5) is added as a reason when the sender isn't k
 
 ```
 App                         all state lives here
-â”œâ”€â”€ header.masthead         title, "Or try" sample links
-â”œâ”€â”€ main
-â”‚   â”œâ”€â”€ UploadCard          01: screenshot â†’ OCR â†’ onParsed(fields)
-â”‚   â””â”€â”€ TransactionForm     02: controlled form (fully driven by App state)
-â”œâ”€â”€ aside
-â”‚   â””â”€â”€ ResultCard          03: result slip, sticky on desktop
-â”œâ”€â”€ ModelInfo               training summary and metrics table from /api/model-info
-â””â”€â”€ footer                  disclaimer, 1930 helpline
+├── header.masthead         title, "Or try" sample links
+├── main
+│   ├── UploadCard          01: screenshot → OCR → onParsed(fields)
+│   └── TransactionForm     02: controlled form (fully driven by App state)
+├── aside
+│   └── ResultCard          03: result slip, sticky on desktop
+├── ModelInfo               training summary and metrics table from /api/model-info
+└── footer                  disclaimer, 1930 helpline
 ```
 
 State in `App.jsx`:
@@ -453,7 +453,7 @@ State in `App.jsx`:
 
 ### 9.2 Main flows
 
-**Screenshot â†’ form (`applyParsed`):**
+**Screenshot → form (`applyParsed`):**
 - `direction = received` sets the type to "Received money". `sent` sets "Sent money", unless the user already chose "Cash withdrawal".
 - It fills `amount`, `when` (parsed date, or today, plus the parsed time, default 12:00), `txnId`, `payee`, `payeeUpi` and `status`, and marks them as filled.
 - It returns `{found, missing}` for the status chips. For sent money, "Balance before" is always missing and gets focus. For received money, "3 quick questions" are missing.
@@ -469,17 +469,17 @@ State in `App.jsx`:
 ### 9.3 Form behaviour
 
 - "Sent money / Cash withdrawal / Received money" is a radio group styled as a segmented control (3 columns, stacked below 560 px).
-- Sent and cash-out show sender balances (before is required, after is optional with a live hint "Will use â‚¹â€¦ (balance before âˆ’ amount)"), plus the optional receiver-balance section.
+- Sent and cash-out show sender balances (before is required, after is optional with a live hint "Will use ₹… (balance before − amount)"), plus the optional receiver-balance section.
 - Received money hides the balances and shows three Yes / No / Not sure questions, with a note that received money is checked with rules rather than the model.
 - "Reference details" (transaction ID, name, UPI ID, status) are kept for the user's record and never scored. Their labels switch between "Paid to / Receiver's UPI ID" and "Received from / Sender's UPI ID".
 
 ### 9.4 Result slip
 
-- **Header:** "03 Â· Risk check" and the time of the check, or "Awaiting details".
+- **Header:** "03 · Risk check" and the time of the check, or "Awaiting details".
 - **Verdict:** a stamp ("Low / Medium / High risk") in the band colour, a serif headline, and an explanation. The wording differs for received money.
 - **Score:** "Fraud score NN.N%" for the model (2 decimals below 1%), or "Checked with: Scam rules".
-- **Scale:** three bands, with the active band coloured and a â–¼ marker at `meter`.
-- **Reasons:** â–² raises risk, â–¼ lowers risk. Screen readers hear "Raises risk:" / "Lowers risk:".
+- **Scale:** three bands, with the active band coloured and a ▼ marker at `meter`.
+- **Reasons:** ▲ raises risk, ▼ lowers risk. Screen readers hear "Raises risk:" / "Lowers risk:".
 - **Advice** for medium and high: separate lists for sent money (block UPI, call 1930, cybercrime.gov.in, never share the PIN) and received money (don't return money yourself, never enter the PIN to receive, wait for the bank credit, tell the bank).
 - **Reference lines** with dotted leaders: transaction ID, name, UPI ID, status, receiver-balance usage.
 
@@ -504,25 +504,25 @@ Output: `{app, direction, amount, txnId, payee, payeeUpi, status, date, time}`. 
 | Field | Method |
 |---|---|
 | `app` | Keyword in this order: BHIM, PhonePe, Google Pay ("Google Pay", "Google transaction", "G Pay"), Paytm. BHIM is checked first because its receipts can contain "paytm" inside UPI IDs |
-| `direction` | **received:** "Money received", "Received from", "Credited to", "You received", or a line starting "From Name" (no colon, which is GPay's received heading). **sent:** "Money sent", "Paid to", "Sent to", "Debited", "Paid", or a line starting "To â€¦". Received is checked first |
-| `amount` | (1) **Tallest amount-shaped word**: matches `[â‚¹ misread]? digits[,grouping][.dd]`, allowing a leading `Z I % & ? Â¥ F` (common â‚¹ misreads). It is accepted only if its height is â‰¥ 1.25 Ã— the median word height. (2) **Amount in words** ("Rupees Three Hundred Sixty Nine Only", Paytm), parsed with hundred / thousand / lakh / crore, and preferred when the two disagree. (3) Text patterns after `â‚¹ / Rs / INR` or "amount / debited / credited". (4) A short number standing alone on two lines (PhonePe shows the amount twice) |
+| `direction` | **received:** "Money received", "Received from", "Credited to", "You received", or a line starting "From Name" (no colon, which is GPay's received heading). **sent:** "Money sent", "Paid to", "Sent to", "Debited", "Paid", or a line starting "To …". Received is checked first |
+| `amount` | (1) **Tallest amount-shaped word**: matches `[₹ misread]? digits[,grouping][.dd]`, allowing a leading `Z I % & ? ¥ F` (common ₹ misreads). It is accepted only if its height is ≥ 1.25 × the median word height. (2) **Amount in words** ("Rupees Three Hundred Sixty Nine Only", Paytm), parsed with hundred / thousand / lakh / crore, and preferred when the two disagree. (3) Text patterns after `₹ / Rs / INR` or "amount / debited / credited". (4) A short number standing alone on two lines (PhonePe shows the amount twice) |
 | `txnId` | Priority: the number after "UTR / RRN / UPI Ref No / UPI transaction ID", then any 12-digit number, then the app's own "Transaction ID / Order ID". The 12-digit UTR is the reference banks and cybercrime.gov.in ask for |
 | `payee` | The other party. **Received:** the name after "Received from" or "From". **Sent:** after "Paid to", "Sent to", "To", "Banking Name" or "Payment received by". It takes the first plausible name on the label's line or the next 3 lines, after removing brackets and non-letters, dropping 1-letter fragments, and rejecting label words |
-| `payeeUpi` | The first `handle@psp` after that name's label (`.com/.in/.org/.net` emails excluded). A masked prefix (`*`, `+`, `â€¢`, `~`) is shown as `â€¢â€¢â€¢â€¢` plus the visible part |
+| `payeeUpi` | The first `handle@psp` after that name's label (`.com/.in/.org/.net` emails excluded). A masked prefix (`*`, `+`, `•`, `~`) is shown as `••••` plus the visible part |
 | `status` | Failed / Pending / Successful from keywords ("received" and "credited" count as successful) |
-| `date` | `16 Jul 2026`, `13 Sept 2026`, `1st Oct 26` (ordinal, 2-digit year â†’ 20xx), `Oct 3, 2026`, and day-first `03/10/2026` / `03-10-26` |
-| `time` | `05:15 PM`, `12:25am`, `22:45`; 12 AM â†’ 0, PM adds 12 |
+| `date` | `16 Jul 2026`, `13 Sept 2026`, `1st Oct 26` (ordinal, 2-digit year → 20xx), `Oct 3, 2026`, and day-first `03/10/2026` / `03-10-26` |
+| `time` | `05:15 PM`, `12:25am`, `22:45`; 12 AM → 0, PM adds 12 |
 
 ### 10.3 Verified receipts
 
-Tested end to end in the running app (upload â†’ OCR â†’ form â†’ result) with headless Microsoft Edge:
+Tested end to end in the running app (upload → OCR → form → result) with headless Microsoft Edge:
 
 | Receipt | App | Direction | Amount | Other party | Reference | Date and time |
 |---|---|---|---|---|---|---|
-| Paytm "Money Received" | Paytm | received | â‚¹369 | Mansuri Alfej Aminbhai, â€¢â€¢â€¢â€¢0259@ptsbi | 619776821616 | 16 Jul 2026 17:15 |
-| PhonePe "Received from" (dark) | PhonePe | received | â‚¹300 | Girish Kumbhar | 480477957831 (UTR) | 13 Sep 2026 23:09 |
-| Google Pay sent (dark) | Google Pay | sent | â‚¹20 | Ishita Sharma, â€¢â€¢â€¢â€¢a226@okicici | 662276817283 | 13 Sep 2026 20:28 |
-| BHIM "Paid" (dark) | BHIM | sent | â‚¹2,824.92 | JIO Postpaid, â€¢â€¢â€¢â€¢53817591@ptybl | 002554331387 | 1 Oct 2026 00:25 |
+| Paytm "Money Received" | Paytm | received | ₹369 | Mansuri Alfej Aminbhai, ••••0259@ptsbi | 619776821616 | 16 Jul 2026 17:15 |
+| PhonePe "Received from" (dark) | PhonePe | received | ₹300 | Girish Kumbhar | 480477957831 (UTR) | 13 Sep 2026 23:09 |
+| Google Pay sent (dark) | Google Pay | sent | ₹20 | Ishita Sharma, ••••a226@okicici | 662276817283 | 13 Sep 2026 20:28 |
+| BHIM "Paid" (dark) | BHIM | sent | ₹2,824.92 | JIO Postpaid, ••••53817591@ptybl | 002554331387 | 1 Oct 2026 00:25 |
 
 Every field was correct on all four. Untested layouts include PhonePe and Paytm *sent* receipts, Google Pay and BHIM *received* receipts, and bank apps. The wording for these is coded but not checked against real images.
 
@@ -541,20 +541,20 @@ The look is "paper and ink", modelled on bank receipts and ledgers rather than g
 | `--ink` | `#1d1b17` | `#ece7dc` | Text, primary button, selected options |
 | `--muted` | `#6b665c` | `#a39d90` | Secondary text |
 | `--rule` | `#d9d3c5` | `#36332c` | Hairlines |
-| `--input-line` | `#8f887a` | `#6e685d` | Input borders (â‰¥ 3:1 against the surface) |
+| `--input-line` | `#8f887a` | `#6e685d` | Input borders (≥ 3:1 against the surface) |
 | `--focus` | `#2457c5` | `#8fb0ff` | Focus outlines |
 | `--low` / `--med` / `--high` | green / ochre / red | lighter variants | Risk colours, each with a `-soft` background |
 
 **Type:** Instrument Serif for display (title, section headings, verdict), IBM Plex Sans for body, IBM Plex Mono for figures, labels and inputs that take numbers. Fallbacks are Georgia, the system UI font and Consolas.
 
-**Layout:** a masthead with an ink rule, then two columns (a fluid form and a 380 px sticky slip) that become one column below 900 px. Sections are numbered 01â€“03 with thin rules instead of cards. The "About the model" section is full width below.
+**Layout:** a masthead with an ink rule, then two columns (a fluid form and a 380 px sticky slip) that become one column below 900 px. Sections are numbered 01–03 with thin rules instead of cards. The "About the model" section is full width below.
 
 **Accessibility:**
 - Real radio inputs, visually hidden but focusable, back the segmented control and the Yes / No pills, with `role="radiogroup"` and `<fieldset>`/`<legend>`.
 - Visible `:focus-visible` outlines.
 - `aria-live` on the OCR status and the result.
 - `role="alert"` on errors.
-- Hidden text for the â–² / â–¼ glyphs.
+- Hidden text for the ▲ / ▼ glyphs.
 - No horizontal scroll at 390 px width.
 
 ---
@@ -593,7 +593,7 @@ npm run dev                       # http://localhost:5173
 
 **Windows notes:**
 - If PowerShell blocks `npm` or `Activate.ps1` ("running scripts is disabled"), run `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` once, or use `npm.cmd`.
-- If `uvicorn` is "not recognized", run it through the venv: `.\.venv\Scripts\python.exe -m uvicorn â€¦`.
+- If `uvicorn` is "not recognized", run it through the venv: `.\.venv\Scripts\python.exe -m uvicorn …`.
 
 ### 13.2 Single server
 
@@ -628,7 +628,7 @@ In development only Vite needs to listen on the network. API calls from the phon
 | Backend port | `uvicorn --port` | 8000 |
 | CORS origins | `backend/app/main.py` | localhost:5173 and 127.0.0.1:5173 |
 | Split boundaries, mask rate, seed | `train_model.py` constants | 400 / 550, 0.5, 42 |
-| Large received amount | `received.py` `LARGE_AMOUNT` | â‚¹50,000 |
+| Large received amount | `received.py` `LARGE_AMOUNT` | ₹50,000 |
 | Risk thresholds | `meta.json` (set by training) | 0.2778 / 0.0695 |
 
 There are no environment variables or secrets.
@@ -641,9 +641,9 @@ There is **no automated test suite** yet. Verification so far:
 
 | Area | How it was checked |
 |---|---|
-| Model | Hold-out test set by time ([Â§6.4](#64-metrics)); thresholds chosen on validation only |
+| Model | Hold-out test set by time ([§6.4](#64-metrics)); thresholds chosen on validation only |
 | Data filter | Profiled the dropped rows: 2,488,650 rows, 45 frauds, legit balances never add up |
-| `/api/check-received` | Scripted calls covering each rule (known sender, stranger, large night credit, asked to return, fake screenshot, all unsure, invalid answer â†’ 400) |
+| `/api/check-received` | Scripted calls covering each rule (known sender, stranger, large night credit, asked to return, fake screenshot, all unsure, invalid answer → 400) |
 | `/api/predict` | Sample buttons (known legit and fraud test rows) and manual inputs |
 | OCR parser | Node script running Tesseract.js with the app's settings on the four receipts |
 | Full app | Headless Edge via the Chrome DevTools Protocol: upload each receipt into the real file input, wait for OCR, read the form, answer questions or enter a balance, submit, and screenshot in light, dark and 390 px mobile |
@@ -659,7 +659,7 @@ Recommended next steps:
 
 - **Synthetic training data:** PaySim is close to separable and only models account takeover. The near-perfect metrics will not carry over to real UPI fraud.
 - **Scores near 0 or 1:** the medium band is rare, and partial payments score low even at 4 AM.
-- **Amounts are in PaySim's simulated currency**, shown as â‚¹ and not calibrated to typical UPI amounts.
+- **Amounts are in PaySim's simulated currency**, shown as ₹ and not calibrated to typical UPI amounts.
 - **Sent-money checks need the balance:** a screenshot doesn't show it, so the user must add it from the bank SMS or app.
 - **Received money uses rules,** which depend on the user's honest answers.
 - **OCR is tested on one receipt per app.** Unusual layouts, other languages, low-resolution or cropped images may need manual entry. OCR needs internet the first time (CDN downloads).
