@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import UploadCard from "./components/UploadCard.jsx";
-import TransactionForm from "./components/TransactionForm.jsx";
-import ResultCard from "./components/ResultCard.jsx";
-import ModelInfo from "./components/ModelInfo.jsx";
-import { checkReceived, getModelInfo, predict } from "./lib/api.js";
-import { localDateTime } from "./lib/format.js";
+import { Link, useNavigate } from "react-router";
+import UploadCard from "../components/UploadCard.jsx";
+import TransactionForm from "../components/TransactionForm.jsx";
+import ResultCard from "../components/ResultCard.jsx";
+import ModelInfo from "../components/ModelInfo.jsx";
+import { checkReceived, createTransaction, getModelInfo, predict } from "../lib/api.js";
+import { useAuth } from "../lib/auth.jsx";
+import { localDateTime } from "../lib/format.js";
 
 const EMPTY_FORM = {
   type: "TRANSFER",
@@ -25,15 +27,22 @@ const EMPTY_FORM = {
 };
 
 const num = (v) => (String(v).trim() === "" ? null : Number(v));
+const DIRECTION = { TRANSFER: "sent", CASH_OUT: "cash_out", RECEIVED: "received" };
+const STATUS = { Successful: "success", Failed: "failed", Pending: "pending" };
 
-export default function App() {
+export default function Check() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [form, setForm] = useState(() => ({ ...EMPTY_FORM, when: localDateTime() }));
   const [filled, setFilled] = useState(() => new Set()); // fields filled from the screenshot
+  const [app, setApp] = useState(null);                  // payment app detected by OCR
   const [destOpen, setDestOpen] = useState(false);
   const [refOpen, setRefOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [checked, setChecked] = useState(null); // form values behind the current result
   const [modelInfo, setModelInfo] = useState(null);
   const [modelInfoFailed, setModelInfoFailed] = useState(false);
   const balBeforeRef = useRef(null);
@@ -82,6 +91,7 @@ export default function App() {
     mark(refs[1] || refs[2], received ? "Sender" : "Payee");
     if (refs.some(Boolean)) setRefOpen(true);
     missing.push(received ? "3 quick questions" : "Balance before");
+    setApp(p.app || null);
 
     setForm((f) => {
       const keepCashOut = f.type === "CASH_OUT" && updates.type === "TRANSFER";
@@ -127,10 +137,43 @@ export default function App() {
         ...r, checkedAt, received,
         refs: { txnId: values.txnId, payee: values.payee, payeeUpi: values.payeeUpi, status: values.status },
       });
+      setChecked(values);
     } catch (err) {
       setError(err.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Store the checked transaction and open its investigation (scored against the user's history).
+  async function saveAndInvestigate() {
+    const v = checked;
+    setSaving(true);
+    setError("");
+    try {
+      const received = v.type === "RECEIVED";
+      const tx = await createTransaction({
+        occurred_at: v.when,
+        direction: DIRECTION[v.type],
+        amount: num(v.amount),
+        counterparty_name: v.payee || null,
+        // masked IDs from receipts ("••••0259@ptsbi") aren't full UPI IDs, so they're kept as the name only
+        counterparty_upi: v.payeeUpi.includes("@") && !v.payeeUpi.startsWith("•") ? v.payeeUpi : null,
+        external_id: /^[A-Za-z0-9-]{4,64}$/.test(v.txnId) ? v.txnId : null,
+        status: STATUS[v.status] || "success",
+        payment_app: app,
+        balance_before: received ? null : num(v.balBefore),
+        balance_after: received ? null : num(v.balAfter),
+        receiver_balance_before: received ? null : num(v.destBefore),
+        receiver_balance_after: received ? null : num(v.destAfter),
+        received_answers: received ? { knows_sender: v.knowsSender, in_bank: v.inBank, asked_to_pay: v.askedToPay } : null,
+        source: filled.size ? "screenshot" : "manual",
+      });
+      window.dispatchEvent(new Event("upig:alerts"));
+      navigate(`/investigate/${tx.id}`);
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
     }
   }
 
@@ -155,14 +198,14 @@ export default function App() {
   }
 
   return (
-    <div className="wrap">
+    <>
       <header className="masthead">
         <div>
-          <p className="label">Payment risk check · UPI</p>
-          <h1>UPI Fraud <em>Check</em></h1>
+          <p className="label">Check · screenshot or details</p>
+          <h1>Check a <em>payment</em></h1>
           <p className="lede">
             Upload a payment screenshot or type the details. The model scores how closely the payment matches
-            account-takeover fraud, and says why.
+            account-takeover fraud, and says why. <Link to="/scan">Scan a message, link, QR or UPI ID →</Link>
           </p>
         </div>
         <div className="samples">
@@ -173,7 +216,7 @@ export default function App() {
       </header>
 
       <div className="layout">
-        <main>
+        <div>
           <UploadCard onParsed={applyParsed} />
           <TransactionForm
             form={form}
@@ -188,19 +231,29 @@ export default function App() {
             error={error}
             balBeforeRef={balBeforeRef}
           />
-        </main>
+        </div>
         <aside>
           <ResultCard result={result} />
+          {result && (
+            <div className="save-panel">
+              {user ? (
+                <>
+                  <button type="button" className="primary" disabled={saving} onClick={saveAndInvestigate}>
+                    {saving ? "Saving…" : "Save & investigate"}
+                  </button>
+                  <p className="note">Adds it to your history and re-scores it against your past payments (new recipient,
+                    unusual amount, rapid transfers…).</p>
+                </>
+              ) : (
+                <p className="note"><Link to="/login?next=/check">Sign in</Link> to save this payment, compare it with your
+                  history and open an investigation.</p>
+              )}
+            </div>
+          )}
         </aside>
       </div>
 
       <ModelInfo info={modelInfo} failed={modelInfoFailed} />
-
-      <footer>
-        Educational project. The model is trained on PaySim, a synthetic mobile-money dataset, because no public dataset of
-        real UPI fraud exists. It is not financial advice. If you think you were defrauded, call the National Cyber Crime
-        Helpline <b>1930</b> or report at <b>cybercrime.gov.in</b>.
-      </footer>
-    </div>
+    </>
   );
 }

@@ -13,6 +13,7 @@ from ..auth import audit, current_user
 from ..db import get_db
 from ..engine import csv_import
 from ..engine import upi as U
+from ..engine.redact import redact
 from ..models import Case, Note, Transaction, User
 from .common import ReviewStatus, TransactionDetail, TransactionIn, TransactionOut, own_transaction
 
@@ -203,7 +204,7 @@ def investigation(tx_id: int, user: User = Depends(current_user), db: Session = 
 @router.post("/investigations/{tx_id}/notes", response_model=NoteOut)
 def add_note(tx_id: int, body: NoteIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     tx = own_transaction(db, user, tx_id)
-    note = Note(user_id=user.id, transaction_id=tx.id, text=body.text.strip())
+    note = Note(user_id=user.id, transaction_id=tx.id, text=redact(body.text.strip()))
     db.add(note)
     db.commit()
     return NoteOut(id=note.id, text=note.text, created_at=note.created_at)

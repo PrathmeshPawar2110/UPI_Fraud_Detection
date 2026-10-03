@@ -266,6 +266,9 @@ def test_demo_data_network_and_removal(user):
     assert g["stats"]["cycles"] >= 1 and g["clusters"]
     mule = next(n for n in g["nodes"] if n["id"] == "party:quickpay.mule01@axl")
     assert mule["suspicious"] and any("circular" in f for f in mule["flags"])
+    devices = {n["id"]: n for n in g["nodes"] if n["kind"] == "device"}
+    assert devices["device:iphone-x91"]["suspicious"]          # used only for the takeover
+    assert not devices["device:android-7f3a"]["suspicious"]    # the user's everyday phone isn't accused
     ego = user.get("/api/network/entity/party:quickpay.mule01@axl").json()
     assert ego["center"] == "party:quickpay.mule01@axl" and len(ego["nodes"]) > 1
     assert user.get("/api/network/entity/party:nobody@ybl").status_code == 404
@@ -318,6 +321,16 @@ def test_security_headers_and_limits(client):
     big = client.post("/api/message/analyze", content=b"x" * 1_100_000, headers={"content-type": "application/json"})
     assert big.status_code == 413
     assert client.get("/api/does-not-exist").status_code == 404
+
+
+def test_csp_matches_vercel_config():
+    """The CSP served by FastAPI and the one in vercel.json must stay identical."""
+    import json
+    from pathlib import Path
+    from app.main import CSP
+    cfg = json.loads((Path(__file__).resolve().parents[2] / "vercel.json").read_text())
+    headers = {h["key"]: h["value"] for block in cfg["headers"] for h in block["headers"]}
+    assert headers["Content-Security-Policy"] == CSP
 
 
 def test_cors_only_dev_origin(client):

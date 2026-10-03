@@ -49,6 +49,14 @@ SECURITY_HEADERS = {
 }
 
 
+# Same policy as vercel.json (keep in sync). OCR needs the jsDelivr worker/core, WebAssembly and the
+# tessdata language files; React's style attributes need 'unsafe-inline' styles; no inline scripts.
+CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net blob:; "
+       "worker-src 'self' blob:; connect-src 'self' data: https://cdn.jsdelivr.net https://tessdata.projectnaptha.com; "
+       "img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src 'self' https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
+
+
 @app.middleware("http")
 async def limits_and_headers(request: Request, call_next):
     length = request.headers.get("content-length")
@@ -59,6 +67,8 @@ async def limits_and_headers(request: Request, call_next):
         response.headers.setdefault(k, v)
     if request.url.path.startswith("/api/"):
         response.headers.setdefault("Cache-Control", "no-store")
+    elif request.url.path not in ("/docs", "/redoc"):  # Swagger UI loads its own CDN assets
+        response.headers.setdefault("Content-Security-Policy", CSP)
     return response
 
 

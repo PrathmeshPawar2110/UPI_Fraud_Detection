@@ -97,10 +97,16 @@ def analyze(nodes: dict, edges: list) -> dict:
             flags[nid].append(f"Fan-out: sends to {len(out_deg[nid])} accounts")
         if n["reports"]:
             flags[nid].append(f"{n['reports']} unverified community report(s)")
-    # devices used across several counterparties in risky transactions
+    # A device is flagged only when most of its payment edges are risky (e.g. a new phone used just for the
+    # takeover), not because one risky payment went through the user's everyday phone.
+    by_device = defaultdict(list)
     for e in edges:
-        if e["kind"] == "USED_DEVICE" and e["risk"] in ("medium", "high"):
-            flags[e["source"]].append("Device used in risky transactions")
+        if e["kind"] == "USED_DEVICE":
+            by_device[e["source"]].append(e["risk"])
+    for did, risks in by_device.items():
+        risky = sum(r in ("medium", "high") for r in risks)
+        if risky and risky / len(risks) >= 0.5:
+            flags[did].append(f"Used mainly for risky transactions ({risky} of {len(risks)} recipients)")
 
     cycles = _cycles(adj, max_len=5)
     for c in cycles:
