@@ -102,6 +102,11 @@ jobs:
         if: steps.secrets.outputs.ok == 'true'
         with:
           python-version: "3.12"
+      - name: Install uv (Vercel CLI's Python builder needs it on PATH)
+        if: steps.secrets.outputs.ok == 'true'
+        run: |
+          python -m pip install --upgrade uv
+          uv --version
       - name: Install Vercel CLI
         if: steps.secrets.outputs.ok == 'true'
         run: npm install --global vercel@latest
