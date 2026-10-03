@@ -60,6 +60,28 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return X[FEATURES]
 
 
+def export_trees(model: lgb.Booster, path: Path) -> None:
+    """Write the trees as compact JSON for backend/app/predictor.py (pure-Python inference + SHAP).
+
+    Internal node: f feature, t threshold, m missing type (0 none, 1 zero, 2 NaN), d default-left,
+    c data count, l / r children. Leaf: v value, c data count.
+    """
+    missing = {"None": 0, "Zero": 1, "NaN": 2}
+
+    def node(n):
+        if "leaf_value" in n:
+            return {"v": n["leaf_value"], "c": n.get("leaf_count", 0)}
+        assert n["decision_type"] == "<=", "only numerical splits are supported"
+        return {"f": n["split_feature"], "t": n["threshold"], "m": missing[n["missing_type"]],
+                "d": n["default_left"], "c": n["internal_count"],
+                "l": node(n["left_child"]), "r": node(n["right_child"])}
+
+    dump = model.dump_model()
+    assert dump["objective"].startswith("binary"), dump["objective"]
+    trees = [node(t["tree_structure"]) for t in dump["tree_info"]]
+    path.write_text(json.dumps({"features": dump["feature_names"], "trees": trees}, separators=(",", ":")))
+
+
 def hide_dest(X: pd.DataFrame) -> pd.DataFrame:
     X = X.copy()
     X[DEST_FEATURES] = np.nan
@@ -207,6 +229,8 @@ def main():
 
     OUT.mkdir(parents=True, exist_ok=True)
     model.save_model(OUT / "fraud_model.txt", num_iteration=model.best_iteration)
+    # the deployed API serves the model from this file without lightgbm (see backend/app/predictor.py)
+    export_trees(lgb.Booster(model_file=str(OUT / "fraud_model.txt")), OUT / "trees.json")
     meta = {
         "dataset": "PaySim (Kaggle ealaxi/paysim1), TRANSFER + CASH_OUT, sender balance covers amount",
         "rows_before_filter": n_all, "frauds_before_filter": f_all,

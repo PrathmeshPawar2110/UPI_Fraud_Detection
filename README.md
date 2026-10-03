@@ -4,7 +4,7 @@ A web app that estimates whether a UPI transaction looks like fraud. The user up
 
 The model is LightGBM trained on **PaySim**, as recommended in [data-and-scope.md](data-and-scope.md). It trains on 2,51,957 of PaySim's 63.6 lakh transactions: transfers and cash-outs where the sender's balance covers the amount, steps 1-400. The other rows hold almost no fraud: `CASH_IN`, `PAYMENT` and `DEBIT` have none, and the transfers and cash-outs where the balance doesn't cover the amount hold 45 of the 8,213 frauds (0.5%). The app can't receive those transactions anyway, because a real UPI payment can't exceed the balance.
 
-**Stack:** React 19 + Vite (`frontend/`) · FastAPI + LightGBM (`backend/`) · Tesseract.js for in-browser OCR
+**Stack:** React 19 + Vite (`frontend/`) · FastAPI + LightGBM (`backend/`) · Tesseract.js for in-browser OCR · Vercel + GitHub Actions
 
 Full technical details (architecture, data, model, API, OCR parser, design system, limitations) are in the **[Technical Reference Document](docs/TRD.md)**.
 
@@ -115,9 +115,61 @@ Only needed after changing `train_model.py`.
 3. From the project root:
 
 ```bash
-pip install -r requirements.txt   # pandas, numpy, lightgbm
-python train_model.py             # ~2 min; writes backend/app/model/fraud_model.txt and meta.json
+pip install -r requirements-train.txt   # pandas, numpy, lightgbm
+python train_model.py                   # ~2 min; writes fraud_model.txt, trees.json and meta.json
 ```
+
+Commit all three files in `backend/app/model/`. The API serves `trees.json`, and the tests compare it with `fraud_model.txt`.
+
+## Tests
+
+```bash
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 18 tests
+cd frontend && npm test                                                  # 8 OCR parser tests
+```
+
+- **API:** model info, the 10 sample transactions score as labelled, validation errors, every received-money rule.
+- **Predictor parity:** the pure-Python model matches LightGBM's probabilities (to 1e-12) and SHAP values (to 1e-9) on 320 rows, with and without receiver balances.
+- **Vercel entry point:** `api/index.py` exposes the same app.
+- **OCR parser:** receipts for each app with typical OCR noise (made-up names and numbers).
+
+## Deployment (Vercel, with CI/CD on GitHub Actions)
+
+The whole app runs on Vercel: the React build as static files, and the FastAPI backend as one Python serverless function ([api/index.py](api/index.py)) under the same domain, so `/api` works with no CORS setup.
+
+**The live model runs without LightGBM.** LightGBM plus NumPy and SciPy unpack to ~190 MB, close to Vercel's function size limit, and LightGBM needs the system OpenMP library (`libgomp`). Instead, `train_model.py` exports the trees to `trees.json`, and [predictor.py](backend/app/predictor.py) runs them in pure Python: the same prediction and the same TreeSHAP explanations, checked against LightGBM in the tests. The deployed function only needs FastAPI (root [requirements.txt](requirements.txt)). It scores a request in ~30 ms.
+
+**Pipeline** ([.github/workflows/ci-cd.yml](.github/workflows/ci-cd.yml)):
+
+| Trigger | What runs |
+|---|---|
+| Push or pull request to `main` | Backend tests, a check that the function works with runtime dependencies only, OCR parser tests, frontend build |
+| Push to `main`, tests passed | Production deploy to Vercel, then a smoke test of the live `/api/model-info` and `/api/predict` |
+| Pull request, tests passed | Preview deploy; the URL appears on the workflow run |
+
+Vercel's own Git auto-deploy is turned off in [vercel.json](vercel.json), so nothing deploys unless the tests pass.
+
+**One-time setup:**
+
+1. Create a free account at [vercel.com](https://vercel.com) (sign in with GitHub).
+2. Link the project once from your machine, in the repository root:
+   ```bash
+   npx vercel login
+   npx vercel link        # "Set up and deploy?" yes; keep the default settings, vercel.json supplies them
+   ```
+   This writes `.vercel/project.json` (git-ignored) containing `orgId` and `projectId`.
+3. Create a token at <https://vercel.com/account/tokens>.
+4. In GitHub, go to **Settings → Secrets and variables → Actions → New repository secret** and add:
+   | Secret | Value |
+   |---|---|
+   | `VERCEL_TOKEN` | the token from step 3 |
+   | `VERCEL_ORG_ID` | `orgId` from `.vercel/project.json` |
+   | `VERCEL_PROJECT_ID` | `projectId` from `.vercel/project.json` |
+5. Push to `main`, or re-run the workflow from the **Actions** tab. The production URL appears on the run and in the Vercel dashboard.
+
+Until the secrets are added, the pipeline still runs the tests and skips the deploy job with a notice.
+
+To deploy by hand instead: `npx vercel` (preview) or `npx vercel --prod` (production) from the repository root.
 
 ### API
 
@@ -185,7 +237,7 @@ These follow data-and-scope.md, with two additions found during analysis.
 - **Realistic rows only (addition).** In about 90% of legit PaySim transfers the amount is larger than the sender's balance and the balances don't add up, which is a simulator bookkeeping artefact. Meanwhile 99.5% of frauds add up exactly. A model trained on all rows learns "balances add up = fraud" and flags every real user, because real balances always add up. The app model is trained only on rows a real user could enter (sender balance > 0 and covers the amount): 281,759 rows that keep 99.5% of all frauds. `errorBalanceOrig` is then always about 0, so it is dropped.
 - **Receiver balances optional (addition).** These are hidden (set to NaN) for 50% of training rows, so the model scores well with or without them. LightGBM handles missing values natively.
 - **Monotone constraints:** sending a larger share of the balance, or leaving less behind, can never lower the score.
-- **Explanations** come from LightGBM's built-in SHAP values (`pred_contrib=True`), grouped into balance / amount / time / type / receiver.
+- **Explanations** are TreeSHAP values, the same as LightGBM's `pred_contrib=True` (computed by `predictor.py`), grouped into balance / amount / time / type / receiver.
 
 Features: `is_transfer, amount, hour, oldbalanceOrg, newbalanceOrig, amount_to_balance, drains_account, oldbalanceDest, newbalanceDest, errorBalanceDest`.
 
@@ -211,16 +263,23 @@ Read these numbers with care:
 ```
 data-and-scope.md                    dataset choice and project scope
 docs/TRD.md                          technical reference document
-train_model.py                       training, evaluation, saves the model
-requirements.txt                     training dependencies
+train_model.py                       training, evaluation, saves and exports the model
+requirements-train.txt               training dependencies
+requirements.txt                     deployed API dependencies (Vercel)
+vercel.json                          Vercel build, function and routing settings
+api/index.py                         Vercel serverless entry point (imports backend/app)
+.github/workflows/ci-cd.yml          tests, then deploy to Vercel
 
 backend/
-  requirements.txt                   API dependencies
-  app/main.py                        FastAPI app: POST /api/predict, GET /api/model-info, serves frontend/dist
+  requirements.txt                   local API dependencies (FastAPI, uvicorn)
+  requirements-dev.txt               + pytest, httpx, lightgbm for the tests
+  app/main.py                        FastAPI app: routes, validation errors, serves frontend/dist
   app/schemas.py                     Pydantic request/response models and input validation
-  app/fraud.py                       model loading, features, SHAP-based explanations
+  app/fraud.py                       features, scoring, SHAP-based explanations
+  app/predictor.py                   pure-Python tree inference + TreeSHAP (no lightgbm at runtime)
   app/received.py                    rule-based check for money received
-  app/model/                         fraud_model.txt (LightGBM), meta.json (thresholds, metrics, samples)
+  app/model/                         trees.json (served), fraud_model.txt (LightGBM), meta.json
+  tests/                             API, rules, predictor parity, Vercel entry point
 
 frontend/
   vite.config.js                     dev server, proxies /api to the backend
@@ -230,6 +289,7 @@ frontend/
   src/components/ResultCard.jsx      verdict, meter, reasons, advice
   src/components/ModelInfo.jsx       test-set metrics table
   src/lib/ocrParse.js                app, sent/received, amount, time, UTR, other party, UPI ID, status from OCR
+  src/lib/ocrParse.test.js           parser tests (node --test)
   src/lib/api.js                     fetch helpers
   src/styles.css                     styles (light and dark)
 ```

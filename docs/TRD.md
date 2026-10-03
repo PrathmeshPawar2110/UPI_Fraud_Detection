@@ -6,7 +6,7 @@
 | **Repository** | <https://github.com/PrathmeshPawar2110/UPI_Fraud_Detection> |
 | **Document** | Technical Reference Document (TRD) |
 | **Last updated** | 3 October 2026 |
-| **Status** | Educational project, runs locally |
+| **Status** | Educational project; runs locally or on Vercel, deployed by GitHub Actions |
 
 This document describes how the system works end to end: the data, the model, the backend API, the frontend, screenshot reading (OCR), and how to run, change and extend it. The [README](../README.md) is the short version. This is the complete one.
 
@@ -51,7 +51,7 @@ This document describes how the system works end to end: the data, the model, th
 | Sent money, cash withdrawal | LightGBM model trained on PaySim | PaySim labels outgoing account-takeover fraud |
 | Received money | Transparent rules | PaySim has no labelled scams on incoming money |
 
-**Out of scope.** Real-time integration with banks or NPCI, user accounts, storing transactions, and production deployment. No public dataset of labelled real UPI fraud exists, so the model is trained on a synthetic analogue (see [§5](#5-data)).
+**Out of scope.** Real-time integration with banks or NPCI, user accounts, storing transactions, and production-grade hardening (authentication, rate limiting). The app is deployable to Vercel for demos ([§13.6](#136-deployment-vercel-and-cicd)). No public dataset of labelled real UPI fraud exists, so the model is trained on a synthetic analogue (see [§5](#5-data)).
 
 ---
 
@@ -69,16 +69,16 @@ flowchart LR
         R[Result slip]
     end
     subgraph "FastAPI backend"
-        A1 --> M["fraud.py<br/>features → LightGBM → SHAP reasons"]
+        A1 --> M["fraud.py<br/>features → predictor.py → SHAP reasons"]
         A2 --> RR["received.py<br/>scam rules"]
         MI["GET /api/model-info"] --> META[(meta.json)]
-        M --> MODEL[(fraud_model.txt)]
+        M --> MODEL[(trees.json)]
     end
     M --> R
     RR --> R
     META --> R
     subgraph "Offline (once)"
-        DS[(PaySim CSV<br/>6.36M rows)] --> T[train_model.py] --> MODEL
+        DS[(PaySim CSV<br/>6.36M rows)] --> T["train_model.py<br/>(LightGBM)"] --> MODEL
         T --> META
     end
 ```
@@ -91,7 +91,7 @@ sequenceDiagram
     participant UI as React app
     participant OCR as Tesseract.js
     participant API as FastAPI
-    participant LGB as LightGBM
+    participant LGB as predictor.py (exported trees)
     User->>UI: drop / paste screenshot
     UI->>OCR: recognize(image, PSM 11)
     OCR-->>UI: text + word boxes
@@ -99,13 +99,13 @@ sequenceDiagram
     User->>UI: add balance before, press Check
     UI->>API: POST /api/predict {type, amount, hour, balances}
     API->>API: Pydantic validation (amount ≤ balance)
-    API->>LGB: predict + pred_contrib (SHAP)
+    API->>LGB: predict + TreeSHAP contributions
     LGB-->>API: probability, contributions
     API-->>UI: {probability, risk, meter, reasons}
     UI-->>User: stamp, score, scale, reasons, advice
 ```
 
-Training happens once, offline. The trained model is committed, so running the app needs neither the dataset nor training.
+Training happens once, offline, with LightGBM. The trained model is committed, so running the app needs neither the dataset nor training. At runtime the API does not use LightGBM: it scores the exported trees in pure Python (`predictor.py`), with identical results ([§7.3](#73-scoring-flow-fraudpy)).
 
 ---
 
@@ -134,9 +134,19 @@ No UI framework, CSS framework, router or state library is used: plain React sta
 | Python | 3.10+ (verified on 3.14.7) | Runtime |
 | FastAPI | 0.142.2 (`>=0.115`) | HTTP API, validation errors, static file serving |
 | Pydantic | 2.13.5 | Request/response models and validation |
-| Uvicorn (`[standard]`) | 0.54.0 (`>=0.30`) | ASGI server, auto-reload in development |
-| LightGBM | 4.7.0 (`>=4.3`) | Loading and running the model, SHAP contributions |
-| NumPy | 2.5.3 (`>=1.26`) | Feature vector |
+| Uvicorn (`[standard]`) | 0.54.0 (`>=0.30`) | ASGI server for local runs, auto-reload in development |
+| `predictor.py` (own code) | | Pure-Python tree inference and TreeSHAP for the exported model; no LightGBM, NumPy or SciPy at runtime |
+
+### Testing, CI/CD and hosting
+
+| Technology | Version | Used for |
+|---|---|---|
+| pytest | `>=8` | Backend tests |
+| httpx | `>=0.27` | FastAPI `TestClient` |
+| LightGBM, NumPy | 4.7.0, 2.5.3 | Test-only reference for predictor parity |
+| Node.js test runner | built in (`node --test`) | OCR parser tests |
+| GitHub Actions | `ubuntu-latest`, Python 3.12, Node 22 | CI (tests, build) and CD (deploy) |
+| Vercel | CLI `latest` | Hosting: static frontend plus one Python serverless function |
 
 ### Training (offline)
 
@@ -158,25 +168,40 @@ UPI_Fraud_Detection/
 ├── data-and-scope.md             dataset comparison and why PaySim was chosen
 ├── docs/
 │   └── TRD.md                    this document
-├── requirements.txt              training dependencies (pandas, numpy, lightgbm)
+├── requirements.txt              deployed API dependencies (FastAPI only), installed by Vercel
+├── requirements-train.txt        training dependencies (pandas, numpy, lightgbm)
 ├── train_model.py                data filtering, features, training, evaluation, export
 ├── Dataset/                      PaySim CSV goes here (git-ignored, ~470 MB)
+├── vercel.json                   Vercel build, function and rewrite settings
+├── .vercelignore                 files kept out of Vercel uploads
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml             tests on every push / PR, then deploy to Vercel
+├── api/
+│   └── index.py                  Vercel serverless entry point (imports backend/app)
 │
 ├── backend/
-│   ├── requirements.txt          API dependencies
-│   └── app/
-│       ├── __init__.py
-│       ├── main.py               FastAPI app: routes, CORS, error handler, serves frontend/dist
-│       ├── schemas.py            Pydantic models: Transaction, ReceivedPayment, Prediction
-│       ├── fraud.py              model loading, feature row, SHAP → reasons, risk bands
-│       ├── received.py           rule-based check for received money
-│       └── model/
-│           ├── fraud_model.txt   trained LightGBM model (text format, ~0.5 MB)
-│           └── meta.json         features, thresholds, split, metrics, sample transactions
+│   ├── requirements.txt          local API dependencies (FastAPI, uvicorn)
+│   ├── requirements-dev.txt      + pytest, httpx, lightgbm, numpy for tests
+│   ├── pytest.ini                test paths
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py               FastAPI app: routes, CORS, error handler, serves frontend/dist
+│   │   ├── schemas.py            Pydantic models: Transaction, ReceivedPayment, Prediction
+│   │   ├── fraud.py              feature row, scoring, SHAP → reasons, risk bands
+│   │   ├── predictor.py          pure-Python tree inference + TreeSHAP (port of LightGBM's)
+│   │   ├── received.py           rule-based check for received money
+│   │   └── model/
+│   │       ├── trees.json        exported trees, served by the API (~0.35 MB)
+│   │       ├── fraud_model.txt   trained LightGBM model (reference for tests, ~0.5 MB)
+│   │       └── meta.json         features, thresholds, split, metrics, sample transactions
+│   └── tests/
+│       ├── test_api.py           endpoints, rules, validation, Vercel entry point
+│       └── test_predictor.py     predictor == LightGBM (probabilities and SHAP)
 │
 └── frontend/
     ├── index.html                page shell, fonts, favicon
-    ├── package.json              scripts: dev, dev:network, build, preview
+    ├── package.json              scripts: dev, dev:network, build, preview, test
     ├── vite.config.js            port 5173, proxies /api → 127.0.0.1:8000
     └── src/
         ├── main.jsx              React entry point
@@ -189,11 +214,12 @@ UPI_Fraud_Detection/
         │   └── ModelInfo.jsx     "About the model": training summary and test metrics
         └── lib/
             ├── ocrParse.js       OCR text + word boxes → payment fields
+            ├── ocrParse.test.js  parser tests (made-up receipts per app)
             ├── api.js            fetch helpers for the three endpoints
             └── format.js         ₹ formatting, datetime-local helpers
 ```
 
-Git-ignored: `Dataset/`, `*.csv`, virtual environments, `node_modules/`, `frontend/dist/`, `.env*`, editor folders.
+Git-ignored: `Dataset/`, `*.csv`, virtual environments, `node_modules/`, `frontend/dist/`, `.vercel/`, `.env*`, editor folders.
 
 ---
 
@@ -307,9 +333,10 @@ Implemented in NumPy: average precision (PR-AUC), rank-based ROC-AUC, precision/
 
 ### 6.5 Artifacts
 
-`train_model.py` writes two files to `backend/app/model/`:
+`train_model.py` writes three files to `backend/app/model/`:
 
-- **`fraud_model.txt`**: the LightGBM booster at its best iteration, in LightGBM's text format.
+- **`fraud_model.txt`**: the LightGBM booster at its best iteration, in LightGBM's text format. It isn't used at runtime: it's the reference the parity tests compare against.
+- **`trees.json`**: the same trees exported by `export_trees` from `model.dump_model()`, in compact JSON (~0.35 MB) that the API serves. Internal node: `f` feature index, `t` threshold, `m` missing type (0 none, 1 zero, 2 NaN), `d` default-left, `c` training-data count, `l` / `r` children. Leaf: `v` value, `c` count. The export asserts a binary objective and numerical (`<=`) splits only.
 - **`meta.json`**:
 
 | Key | Content |
@@ -369,10 +396,10 @@ Model validator: `amount ≤ sender_balance_before + 1`. A UPI payment cannot ex
 
 ### 7.3 Scoring flow ([fraud.py](../backend/app/fraud.py))
 
-1. **Load once at import:** the booster from `fraud_model.txt`, and `features` and `thresholds` from `meta.json`.
+1. **Load once at import:** the trees from `trees.json` into a `predictor.Model` (~0.25 s), and `features` and `thresholds` from `meta.json`. An assertion checks that both files list the same features.
 2. **`build_row`:** turns a `Transaction` into the feature dict in [§6.1](#61-features). Receiver features are used only when **both** receiver balances are given, otherwise NaN.
 3. **Predict:** `MODEL.predict(x)` gives the probability.
-4. **Explain:** `MODEL.predict(x, pred_contrib=True)` gives per-feature SHAP contributions in log-odds (LightGBM's built-in TreeSHAP). They are summed into five groups:
+4. **Explain:** `MODEL.contributions(x)` gives per-feature SHAP contributions in log-odds, identical to LightGBM's `pred_contrib=True` ([§7.5](#75-runtime-predictor-predictorpy)). They are summed into five groups:
 
    | Group | Features |
    |---|---|
@@ -393,6 +420,27 @@ Amounts in reasons use Indian digit grouping (`₹12,34,567`).
 - **Validation errors** (HTTP 400 instead of FastAPI's default 422) are turned into one readable message, `{"detail": "Amount: input should be greater than 0."}`, using a field-label map. The frontend shows `detail` as is.
 - **CORS** allows `http://localhost:5173` and `http://127.0.0.1:5173`. In development the Vite proxy makes calls same-origin anyway.
 - **Single-server mode:** if `frontend/dist` exists, FastAPI mounts it at `/` with `html=True`, so `uvicorn` alone serves both the UI and the API.
+- **On Vercel** the frontend and API share one domain, so CORS isn't involved. The function bundle doesn't include `frontend/dist`, so the mount is skipped there.
+
+### 7.5 Runtime predictor ([predictor.py](../backend/app/predictor.py))
+
+**Why it exists.** Running LightGBM in the deployed function would need LightGBM, NumPy and SciPy (~190 MB unpacked, close to Vercel's Python function limit) and the system OpenMP library `libgomp`, which LightGBM's Linux build links against but doesn't bundle. A tree ensemble is simple to evaluate, so the API runs the exported trees in pure Python. The deployed function then needs only FastAPI (~25 MB of packages).
+
+**What it implements**, ported line for line from LightGBM's C++ (`tree.h`, `tree.cpp`):
+
+| Function | LightGBM original | Role |
+|---|---|---|
+| `_goes_left` | `NumericalDecision` | Split rule with missing values: NaN is treated as 0 unless the split's missing type is NaN; NaN (or zero, for missing type Zero) follows the default direction; otherwise `value <= threshold` goes left |
+| `Model.raw` / `predict` | `Predict` | Sum of the reached leaf values; probability = 1 / (1 + e^(−raw)) (objective `binary sigmoid:1`) |
+| `_expected_value` | `ExpectedValue` | Leaf values averaged by training counts; summed over trees, this is the SHAP base value |
+| `_tree_shap`, `_extend`, `_unwind`, `_unwound_sum` | `TreeSHAP`, `ExtendPath`, `UnwindPath`, `UnwoundPathSum` | Exact TreeSHAP (Lundberg et al., 2018), with node training counts as cover |
+
+**Guarantees.** `tests/test_predictor.py` compares it with LightGBM on 320 rows (the 10 sample transactions with and without receiver balances, plus 300 random rows with zero balances, emptied accounts and NaN receiver balances):
+- probabilities agree to 1e-12,
+- SHAP contributions agree to 1e-9,
+- contributions sum to the raw score.
+
+**Cost.** About 30 ms per request for 487 trees (prediction plus SHAP) and about 0.25 s to load, measured on the development laptop.
 
 ---
 
@@ -566,8 +614,9 @@ The look is "paper and ink", modelled on bank receipts and ledgers rather than g
 - **Not sent to the API, never stored:** the reference details (transaction ID, names, UPI IDs) stay in the browser.
 - **No persistence:** there is no database, no logging of requests by the app, no accounts and no cookies.
 - **Input validation:** Pydantic constrains every field (types, ranges, finite numbers, allowed values). Invalid input returns HTTP 400 with a short message, never a stack trace.
-- **CORS** is restricted to the dev origin.
-- **Not production-hardened:** there is no authentication, rate limiting or HTTPS termination. It's intended for local or classroom use.
+- **CORS** is restricted to the dev origin. On Vercel, the UI and API share one origin.
+- **Secrets:** the only secrets are the three Vercel values stored as GitHub repository secrets for the deploy job. Pull requests from forks don't receive them, so they can't deploy.
+- **Not production-hardened:** there is no authentication or rate limiting. Vercel provides HTTPS. A public deployment can be called by anyone, which is acceptable here because it stores nothing and holds no user data.
 
 ---
 
@@ -580,7 +629,7 @@ The look is "paper and ink", modelled on bank receipts and ledgers rather than g
 cd backend
 python -m venv .venv
 .venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # or requirements-dev.txt to also run the tests
 uvicorn app.main:app --reload --reload-dir app --port 8000
 
 # frontend (terminal 2)
@@ -616,9 +665,10 @@ In development only Vite needs to listen on the network. API calls from the phon
 ### 13.4 Retraining
 
 1. Download the PaySim CSV from Kaggle into `Dataset/PS_20174392719_1491204439457_log.csv`.
-2. `pip install -r requirements.txt`, then `python train_model.py` (about 2 minutes).
-3. Restart the backend so it loads the new `fraud_model.txt` and `meta.json`.
-4. If the filters change, update the hard-coded "63.6 lakh" and "99.5% of all frauds" in [ModelInfo.jsx](../frontend/src/components/ModelInfo.jsx) and the README. Other figures are read from `meta.json`.
+2. `pip install -r requirements-train.txt`, then `python train_model.py` (about 2 minutes). This writes `fraud_model.txt`, `trees.json` and `meta.json`.
+3. Run the backend tests. The parity test confirms that `trees.json` matches `fraud_model.txt`, and the sample tests confirm the new samples score as labelled.
+4. Commit all three files. Pushing to `main` deploys the new model. Locally, restart the backend.
+5. If the filters change, update the hard-coded "63.6 lakh" and "99.5% of all frauds" in [ModelInfo.jsx](../frontend/src/components/ModelInfo.jsx) and the README. Other figures are read from `meta.json`.
 
 ### 13.5 Configuration
 
@@ -630,28 +680,80 @@ In development only Vite needs to listen on the network. API calls from the phon
 | Split boundaries, mask rate, seed | `train_model.py` constants | 400 / 550, 0.5, 42 |
 | Large received amount | `received.py` `LARGE_AMOUNT` | ₹50,000 |
 | Risk thresholds | `meta.json` (set by training) | 0.2778 / 0.0695 |
+| Vercel build, function, routing | `vercel.json` | see [§13.6](#136-deployment-vercel-and-cicd) |
+| Deploy credentials | GitHub repository secrets | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` |
 
-There are no environment variables or secrets.
+The app itself uses no environment variables.
+
+### 13.6 Deployment (Vercel) and CI/CD
+
+**Hosting layout.** One Vercel project serves the following under one domain:
+
+| Part | How |
+|---|---|
+| Frontend | `installCommand: npm --prefix frontend ci`, `buildCommand: npm --prefix frontend run build`, `outputDirectory: frontend/dist` (static files on Vercel's CDN) |
+| API | `api/index.py` is a Python serverless function. It adds `backend/` to `sys.path` and exposes `app.main.app` (ASGI). `includeFiles: backend/app/**` ships the code, `trees.json` and `meta.json`; `fraud_model.txt` is excluded. Dependencies come from the root `requirements.txt` (FastAPI only). `maxDuration: 10` s |
+| Routing | Rewrite `/api/(.*)` → `/api/index`. FastAPI still sees the original path, such as `/api/predict` |
+| Git integration | `git.deploymentEnabled: false`: Vercel doesn't auto-deploy on push; GitHub Actions does, after the tests pass |
+
+**Pipeline** ([.github/workflows/ci-cd.yml](../.github/workflows/ci-cd.yml)), triggered by a push or pull request to `main`, or by hand:
+
+```mermaid
+flowchart LR
+    A[push / PR] --> B["backend job<br/>pytest: API, rules, parity<br/>+ runtime-only import check"]
+    A --> C["frontend job<br/>npm ci · npm test · npm run build"]
+    B --> D{both pass?}
+    C --> D
+    D -->|push to main| E["deploy --prod<br/>+ live smoke test"]
+    D -->|PR from this repo| F["preview deploy<br/>URL on the run"]
+```
+
+| Job | Steps |
+|---|---|
+| `backend` | Python 3.12. Install `backend/requirements-dev.txt`, then `python -m pytest`. Then create a clean venv with only the root `requirements.txt` and score a transaction through `api/index.py`, which proves the deployed function needs no LightGBM or NumPy |
+| `frontend` | Node 22: `npm ci`, `npm test` (parser), `npm run build` |
+| `deploy` | Needs both jobs. Skips with a notice if the secrets are missing or the PR comes from a fork. Otherwise: `vercel pull`, `vercel build [--prod]`, `vercel deploy --prebuilt [--prod]`. The URL goes to the job summary and the GitHub environment (`production` / `preview`). After a production deploy, it retries `GET /api/model-info` until it returns 200 and checks that `POST /api/predict` returns `"risk":"high"` for an emptied account |
+
+The workflow cancels in-progress runs for the same branch and has read-only repository permissions.
+
+**One-time setup:** see "Deployment" in the [README](../README.md#deployment-vercel-with-cicd-on-github-actions). In short: `npx vercel login` and `npx vercel link` once, create a token, and add `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (from `.vercel/project.json`) as repository secrets.
+
+**Runtime behaviour.** A cold start loads FastAPI and the trees (about 0.25 s for the model). A warm request scores in about 30 ms. The OCR still runs in the visitor's browser, so the function only receives numbers.
 
 ---
 
 ## 14. Testing and verification
 
-There is **no automated test suite** yet. Verification so far:
+### 14.1 Automated tests (run in CI on every push and pull request)
+
+```bash
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 18 tests
+cd frontend && npm test                                                  # 8 tests
+```
+
+| File | Tests | What they prove |
+|---|---|---|
+| `backend/tests/test_predictor.py` | 3 | Pure-Python probabilities match LightGBM to 1e-12 and SHAP to 1e-9 on 320 rows; contributions sum to the raw score |
+| `backend/tests/test_api.py` | 15 | `/api/model-info` shape; all 10 sample transactions score as labelled (low / high) with 1–4 reasons; an emptied account at 3 AM is high risk with the "entire balance" reason; amount > balance and an invalid type return readable 400s; all 7 received-money rule cases; an invalid answer returns 400; `api/index.py` exposes the same routes |
+| `frontend/src/lib/ocrParse.test.js` | 8 | Paytm received, PhonePe received, Google Pay sent, BHIM sent (modelled on real OCR output, with made-up names and numbers), GPay received heading, PhonePe "Paid to", failed status with lakh grouping, and nulls for unrecognisable text |
+| CI runtime check | 1 | The API scores correctly in a venv with only the deployed dependencies |
+| CI smoke test | 1 | After a production deploy, the live API answers `model-info` and scores an emptied account as high risk |
+
+### 14.2 Manual verification
 
 | Area | How it was checked |
 |---|---|
 | Model | Hold-out test set by time ([§6.4](#64-metrics)); thresholds chosen on validation only |
 | Data filter | Profiled the dropped rows: 2,488,650 rows, 45 frauds, legit balances never add up |
-| `/api/check-received` | Scripted calls covering each rule (known sender, stranger, large night credit, asked to return, fake screenshot, all unsure, invalid answer → 400) |
-| `/api/predict` | Sample buttons (known legit and fraud test rows) and manual inputs |
-| OCR parser | Node script running Tesseract.js with the app's settings on the four receipts |
+| OCR on real receipts | Tesseract.js with the app's settings on four real receipts (one per app), every field correct |
 | Full app | Headless Edge via the Chrome DevTools Protocol: upload each receipt into the real file input, wait for OCR, read the form, answer questions or enter a balance, submit, and screenshot in light, dark and 390 px mobile |
+| Deployment size | Linux packages measured: with LightGBM ~190 MB unpacked; runtime-only venv ~25 MB |
 
-Recommended next steps:
-- pytest for `build_row`, `explain`, `check_received` and the validation errors.
-- A golden-file test for `parseUpiText` on saved OCR text from each receipt.
-- A check that `build_features` and `build_row` produce identical vectors.
+### 14.3 Gaps
+
+- No test checks that `train_model.build_features` and `fraud.build_row` produce identical vectors.
+- No browser test runs in CI, so OCR on real images is checked by hand.
+- The first real Vercel deployment has to be checked after the secrets are added; the smoke test then runs on every production deploy.
 
 ---
 
@@ -664,6 +766,8 @@ Recommended next steps:
 - **Received money uses rules,** which depend on the user's honest answers.
 - **OCR is tested on one receipt per app.** Unusual layouts, other languages, low-resolution or cropped images may need manual entry. OCR needs internet the first time (CDN downloads).
 - **Duplicated feature logic** in `train_model.py` and `fraud.py` must be kept in sync by hand.
+- **The runtime predictor supports what this model uses:** a binary objective and numerical splits. A categorical feature or another objective would need `predictor.py` extended (the export asserts this, and the parity test would fail).
+- **Serverless cold starts:** the first request after a quiet period also loads the function (typically a second or two on Vercel).
 - **Hard-coded numbers in the UI:** "63.6 lakh" and "99.5%" must be updated by hand after retraining with different filters.
 
 ---
@@ -673,7 +777,8 @@ Recommended next steps:
 | Change | Where |
 |---|---|
 | Support a new payment app's receipt | Add its keywords to `detectApp`, direction phrases to `detectDirection`, and any new name labels to `findCounterparty` in `ocrParse.js`; check with real screenshots |
-| Add a model feature | `FEATURES` and `build_features` in `train_model.py`, `build_row` (and `GROUPS` / `explain` wording) in `fraud.py`; retrain |
+| Add a model feature | `FEATURES` and `build_features` in `train_model.py`, `build_row` (and `GROUPS` / `explain` wording) in `fraud.py`, `feature_row` in `tests/test_predictor.py`; retrain and commit the three model files |
+| Add a Python dependency to the API | Root `requirements.txt` (deployed) and `backend/requirements.txt` (local); keep it small, and the CI runtime check will catch a missing one |
 | Change risk bands | Threshold logic in `train_model.py` (retrain) or `thresholds` in `meta.json` |
 | Add a received-money rule | `check_received` in `received.py`, the question in `TransactionForm.jsx` `QUESTIONS`, the form field in `App.jsx` `EMPTY_FORM`, and the schema in `ReceivedPayment` |
 | New API endpoint | Route in `main.py`, schema in `schemas.py`, helper in `frontend/src/lib/api.js` |

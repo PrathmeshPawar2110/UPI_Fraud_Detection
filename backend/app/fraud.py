@@ -3,15 +3,14 @@
 import json
 from pathlib import Path
 
-import lightgbm as lgb
-import numpy as np
-
+from .predictor import Model
 from .schemas import Transaction
 
 HERE = Path(__file__).parent
-MODEL = lgb.Booster(model_file=str(HERE / "model" / "fraud_model.txt"))
-META = json.loads((HERE / "model" / "meta.json").read_text())
+MODEL = Model(HERE / "model" / "trees.json")  # exported LightGBM trees, scored in pure Python
+META = json.loads((HERE / "model" / "meta.json").read_text(encoding="utf-8"))
 FEATURES = META["features"]
+assert MODEL.features == FEATURES, "trees.json and meta.json come from different trainings"
 T_HIGH, T_MED = META["thresholds"]["high"], META["thresholds"]["medium"]
 
 
@@ -117,9 +116,9 @@ def meter_position(p: float) -> float:
 
 def score(t: Transaction) -> dict:
     row, dest_known = build_row(t)
-    x = np.array([[row[f] for f in FEATURES]], dtype=float)
-    p = float(MODEL.predict(x)[0])
-    contrib = dict(zip(FEATURES, MODEL.predict(x, pred_contrib=True)[0][:-1]))
+    x = [float(row[f]) for f in FEATURES]
+    p = MODEL.predict(x)
+    contrib = dict(zip(FEATURES, MODEL.contributions(x)[:-1]))
     risk = "high" if p >= T_HIGH else "medium" if p >= T_MED else "low"
     return {
         "probability": p,

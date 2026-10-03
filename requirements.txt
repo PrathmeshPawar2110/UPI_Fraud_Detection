@@ -1,3 +1,4 @@
-pandas>=2.2
-numpy>=1.26
-lightgbm>=4.3
+# Runtime dependencies of the deployed API (Vercel installs this file for api/index.py).
+# The model is served in pure Python (backend/app/predictor.py), so no lightgbm / numpy / scipy here.
+# Local backend: backend/requirements.txt.  Tests: backend/requirements-dev.txt.  Training: requirements-train.txt.
+fastapi>=0.115

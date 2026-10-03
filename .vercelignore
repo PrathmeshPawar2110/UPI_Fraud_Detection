@@ -1,0 +1,6 @@
+Dataset/
+**/*.csv
+backend/.venv/
+**/node_modules/
+frontend/dist/
+**/__pycache__/
