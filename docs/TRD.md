@@ -1,14 +1,16 @@
-# UPI Fraud Check: Technical Reference Document
+# UPI Guard: Technical Reference Document
 
 | | |
 |---|---|
-| **Project** | UPI Fraud Check |
+| **Project** | UPI Guard (formerly UPI Fraud Check) |
 | **Repository** | <https://github.com/PrathmeshPawar2110/UPI_Fraud_Detection> |
 | **Document** | Technical Reference Document (TRD) |
 | **Last updated** | 3 October 2026 |
 | **Status** | Educational project; runs locally or on Vercel, deployed by GitHub Actions |
 
 This document describes how the system works end to end: the data, the model, the backend API, the frontend, screenshot reading (OCR), and how to run, change and extend it. The [README](../README.md) is the short version. This is the complete one.
+
+**Part I** (§1–§16) covers the original single-payment checker, which UPI Guard keeps unchanged. **Part II** (§17–§28) covers the platform built around it: accounts, history, the pattern and unified risk engines, investigation, scam intelligence, cases, the relationship graph, the simulator and the AI investigator.
 
 ---
 
@@ -31,6 +33,21 @@ This document describes how the system works end to end: the data, the model, th
 15. [Limitations and known issues](#15-limitations-and-known-issues)
 16. [Extending the project](#16-extending-the-project)
 
+**Part II: UPI Guard platform**
+
+17. [Platform architecture and data model](#17-platform-architecture-and-data-model)
+18. [Accounts, sessions and access control](#18-accounts-sessions-and-access-control)
+19. [Pattern engine](#19-pattern-engine)
+20. [Unified risk engine](#20-unified-risk-engine)
+21. [Transactions, CSV import and investigation](#21-transactions-csv-import-and-investigation)
+22. [Scam intelligence](#22-scam-intelligence)
+23. [Cases, evidence, incident reports and alerts](#23-cases-evidence-incident-reports-and-alerts)
+24. [Relationship graph](#24-relationship-graph)
+25. [Simulator, demo data and live stream](#25-simulator-demo-data-and-live-stream)
+26. [AI investigator](#26-ai-investigator)
+27. [Frontend application](#27-frontend-application)
+28. [API reference](#28-api-reference)
+
 ---
 
 ## 1. Purpose and scope
@@ -51,7 +68,24 @@ This document describes how the system works end to end: the data, the model, th
 | Sent money, cash withdrawal | LightGBM model trained on PaySim | PaySim labels outgoing account-takeover fraud |
 | Received money | Transparent rules | PaySim has no labelled scams on incoming money |
 
-**Out of scope.** Real-time integration with banks or NPCI, user accounts, storing transactions, and production-grade hardening (authentication, rate limiting). The app is deployable to Vercel for demos ([§13.6](#136-deployment-vercel-and-cicd)). No public dataset of labelled real UPI fraud exists, so the model is trained on a synthetic analogue (see [§5](#5-data)).
+**UPI Guard adds** (Part II): an account with persistent transaction history, CSV import, history-based pattern detection, a unified risk score that combines all evidence, an investigation workspace, message / link / QR / UPI-ID scanners, community reports, cases with incident reports, alerts, a relationship graph, a fraud simulator with synthetic data, and an opt-in AI investigator that explains the stored evidence.
+
+**Feasibility decisions.** Each feature in the expansion specification (`UPI_GUARD_EXPANSION.txt`) was checked before it was built:
+
+| Specified | Decision | Reason |
+|---|---|---|
+| History, patterns, unified risk, investigation, scanners, cases, reports, alerts, graph, simulator, settings, learn, emergency | Built | Deterministic, testable, and deployable on Vercel |
+| Database | Postgres in production, SQLite locally and in tests | Vercel's filesystem is read-only except `/tmp`, which is wiped on cold start |
+| AI investigator | Built with the Claude API, opt-in | Needs an API key and consent, because data leaves the server |
+| Real-time stream | Browser timer calling the API | Vercel functions can't hold long-lived SSE or WebSocket connections |
+| QR scanning | jsQR in the browser, camera over HTTPS | The BarcodeDetector API isn't supported in every browser |
+| URL redirect following | Not done | Fetching user-supplied URLs from the server is a server-side request forgery risk |
+| Shared community reports | Built, aggregate counts only | Unverified reports must not expose reporters or label people publicly |
+| Bank PDF statement import | Not built | There's no standard format; CSV import covers the need |
+| Hindi or Marathi OCR | Not built | Large language data; the text scanner covers Hinglish and common Devanagari words |
+| Voice analysis, federated learning, real Account Aggregator | Not built (future work) | Research or regulated features; Settings shows a clearly labelled AA simulation |
+
+**Out of scope.** Real payments, real account freezing, real bank or NPCI integration, collecting bank credentials, and official-looking alerts. No public dataset of labelled real UPI fraud exists, so the model is trained on a synthetic analogue ([§5](#5-data)).
 
 ---
 
@@ -107,6 +141,36 @@ sequenceDiagram
 
 Training happens once, offline, with LightGBM. The trained model is committed, so running the app needs neither the dataset nor training. At runtime the API does not use LightGBM: it scores the exported trees in pure Python (`predictor.py`), with identical results ([§7.3](#73-scoring-flow-fraudpy)).
 
+**UPI Guard platform (Part II):**
+
+```mermaid
+flowchart TB
+    subgraph Inputs["Input (browser)"]
+        OCR[Screenshot OCR] --- CSV[CSV import] --- MSG[Message] --- URLI[Link] --- QRI["QR (jsQR / camera)"] --- UPII[UPI ID]
+    end
+    subgraph Engines["Intelligence (backend/app/engine)"]
+        ML[ML model + TreeSHAP] --> RISK[Unified risk engine]
+        RULES[Received-money rules] --> RISK
+        PAT[Pattern engine] --> RISK
+        REP[Community reports] --> RISK
+        SCAN[Message / URL / QR / UPI scanners]
+        GRAPH[Relationship graph]
+        SIM[Scenario simulator]
+    end
+    subgraph Store["Database (Postgres / SQLite)"]
+        DB[(users · transactions · cases · notes · entity_reports · alerts · audit_logs · login_attempts)]
+    end
+    subgraph Actions["User actions"]
+        INV[Investigation] --- CASE[Cases & incident report] --- ALERT[Alerts] --- AI[AI investigator] --- EMG[Emergency guidance]
+    end
+    OCR & CSV --> RISK
+    MSG & URLI & QRI & UPII --> SCAN
+    RISK --> DB
+    DB --> PAT & GRAPH & INV & AI
+    SIM --> RISK & SCAN
+    DB --> CASE & ALERT
+```
+
 ---
 
 ## 3. Technology stack
@@ -124,8 +188,11 @@ Versions are those installed and verified on 3 Oct 2026. Ranges in the requireme
 | Tesseract.js | 5.1.1 | OCR in the browser (WebAssembly build of Tesseract) |
 | Node.js | 20.19+ or 22.12+ required by Vite 7 (verified on 24.21.0) | Tooling only |
 | Google Fonts | Instrument Serif, IBM Plex Sans, IBM Plex Mono | Typography |
+| react-router | 7.18.4 (`^7.18.4`) | Client-side routes (Part II pages) |
+| jsQR | 1.4.0 (Apache-2.0) | QR decoding in the browser (lazy-loaded chunk) |
+| d3-force | 3.0.0 (ISC) | Force layout for the relationship graph (rendered as plain SVG) |
 
-No UI framework, CSS framework, router or state library is used: plain React state and one hand-written stylesheet.
+No UI framework, CSS framework or state library is used: plain React state and context, and two hand-written stylesheets (`styles.css`, `platform.css`).
 
 ### Backend
 
@@ -136,6 +203,12 @@ No UI framework, CSS framework, router or state library is used: plain React sta
 | Pydantic | 2.13.5 | Request/response models and validation |
 | Uvicorn (`[standard]`) | 0.54.0 (`>=0.30`) | ASGI server for local runs, auto-reload in development |
 | `predictor.py` (own code) | | Pure-Python tree inference and TreeSHAP for the exported model; no LightGBM, NumPy or SciPy at runtime |
+| SQLAlchemy | 2.1.3 (`>=2.0`) | ORM and database engine (Postgres in production, SQLite locally) |
+| psycopg (binary) | 3.3.6 (`>=3.2`) | Postgres driver |
+| anthropic | 1.11.0 (`>=0.40`) | Claude API client for the AI investigator |
+| Standard library | `hashlib.scrypt`, `hmac` | Password hashing and signed session cookies (no auth dependency) |
+
+The deployed function's packages (root `requirements.txt`) unpack to about 56 MB, well within Vercel's limit.
 
 ### Testing, CI/CD and hosting
 
@@ -181,45 +254,85 @@ UPI_Fraud_Detection/
 │   └── index.py                  Vercel serverless entry point (imports backend/app)
 │
 ├── backend/
-│   ├── requirements.txt          local API dependencies (FastAPI, uvicorn)
+│   ├── requirements.txt          local API dependencies (FastAPI, uvicorn, SQLAlchemy, psycopg, anthropic)
 │   ├── requirements-dev.txt      + pytest, httpx, lightgbm, numpy for tests
 │   ├── pytest.ini                test paths
 │   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py               FastAPI app: routes, CORS, error handler, serves frontend/dist
-│   │   ├── schemas.py            Pydantic models: Transaction, ReceivedPayment, Prediction
-│   │   ├── fraud.py              feature row, scoring, SHAP → reasons, risk bands
+│   │   ├── main.py               FastAPI app: original endpoints, routers, headers, CSP, size limit, SPA fallback
+│   │   ├── config.py             settings from environment variables
+│   │   ├── db.py                 SQLAlchemy engine/sessions (Postgres or SQLite), init_db
+│   │   ├── models.py             ORM tables (§17)
+│   │   ├── auth.py               scrypt passwords, signed session cookies, login throttle, /api/auth
+│   │   ├── services.py           shared per-user operations: history, scoring, alerts, related, rescoring
+│   │   ├── schemas.py            original Pydantic models: Transaction, ReceivedPayment, Prediction
+│   │   ├── fraud.py              feature row, scoring, SHAP → reasons, risk bands, fast predict
 │   │   ├── predictor.py          pure-Python tree inference + TreeSHAP (port of LightGBM's)
 │   │   ├── received.py           rule-based check for received money
+│   │   ├── engine/
+│   │   │   ├── patterns.py       history pattern detectors (§19)
+│   │   │   ├── risk.py           unified risk engine (§20)
+│   │   │   ├── csv_import.py     CSV parsing with flexible columns and dates
+│   │   │   ├── message.py        SMS / WhatsApp scam scanner
+│   │   │   ├── urls.py           link heuristics (never fetches)
+│   │   │   ├── qr.py             UPI QR / deep-link analysis
+│   │   │   ├── upi.py            UPI ID validation, handle → app/bank, lure words
+│   │   │   ├── graph.py          relationship graph, fan-in/out, cycles, clusters
+│   │   │   ├── simulator.py      9 scam scenarios, synthetic baseline, demo dataset, live stream
+│   │   │   ├── guidance.py       emergency steps and official resources
+│   │   │   └── redact.py         masks OTPs, PINs, CVVs and card numbers
+│   │   ├── routes/
+│   │   │   ├── common.py         TransactionIn / Out schemas, ownership check
+│   │   │   ├── transactions.py   history, import, review, investigation, notes
+│   │   │   ├── intel.py          scanners, UPI check, community reports
+│   │   │   ├── cases.py          cases, evidence, notes, incident report
+│   │   │   ├── alerts.py         alerts and guidance
+│   │   │   ├── network.py        graph endpoints
+│   │   │   ├── simulator.py      scenarios, demo data, live stream
+│   │   │   ├── ai.py             AI investigator (Claude, tools, citation check)
+│   │   │   └── account.py        settings, export, deletion, retention, model monitoring
 │   │   └── model/
 │   │       ├── trees.json        exported trees, served by the API (~0.35 MB)
 │   │       ├── fraud_model.txt   trained LightGBM model (reference for tests, ~0.5 MB)
 │   │       └── meta.json         features, thresholds, split, metrics, sample transactions
 │   └── tests/
-│       ├── test_api.py           endpoints, rules, validation, Vercel entry point
-│       └── test_predictor.py     predictor == LightGBM (probabilities and SHAP)
+│       ├── conftest.py           temporary SQLite database, signed-in user fixtures
+│       ├── test_api.py           original endpoints, rules, validation, Vercel entry point
+│       ├── test_predictor.py     predictor == LightGBM (probabilities and SHAP)
+│       ├── test_engine.py        pattern detectors and unified risk properties
+│       ├── test_scanners.py      message / URL / QR / UPI scanners, redaction
+│       ├── test_platform.py      auth, transactions, import, access control, cases, reports, graph, security
+│       └── test_ai.py            AI investigator with a fake Claude client
 │
 └── frontend/
     ├── index.html                page shell, fonts, favicon
     ├── package.json              scripts: dev, dev:network, build, preview, test
     ├── vite.config.js            port 5173, proxies /api → 127.0.0.1:8000
     └── src/
-        ├── main.jsx              React entry point
-        ├── App.jsx               form state, OCR → form mapping, validation, API calls, samples
-        ├── styles.css            design tokens, light/dark themes, all component styles
+        ├── main.jsx              routes (react-router), auth provider
+        ├── styles.css            design tokens, light/dark themes, checker styles
+        ├── platform.css          styles for the platform pages (§27)
+        ├── pages/                Home, Check, Login, Transactions, Investigate, Scan, Network,
+        │                         Simulator, Alerts, Cases (+ report), Reports, Learn, Emergency,
+        │                         Settings, Info (privacy, model, 404)
         ├── components/
-        │   ├── UploadCard.jsx    01: drop / choose / paste screenshot, runs OCR
-        │   ├── TransactionForm.jsx 02: payment type, fields, received-money questions
-        │   ├── ResultCard.jsx    03: result slip (stamp, score, scale, reasons, advice)
+        │   ├── Layout.jsx        top bar, navigation, alert badge, footer
+        │   ├── ui.jsx            Level, Stamp, Synthetic, TxRow, Breakdown, Reasons, Tabs, …
+        │   ├── AiPanel.jsx       AI investigator panel with citation links
+        │   ├── Graph.jsx         force-layout SVG graph with pan / zoom / select
+        │   ├── QrScanner.jsx     QR from image or camera (jsQR)
+        │   ├── UploadCard.jsx    screenshot drop / choose / paste, runs OCR
+        │   ├── TransactionForm.jsx payment type, fields, received-money questions
+        │   ├── ResultCard.jsx    result slip (stamp, score, scale, reasons, advice)
         │   └── ModelInfo.jsx     "About the model": training summary and test metrics
         └── lib/
             ├── ocrParse.js       OCR text + word boxes → payment fields
             ├── ocrParse.test.js  parser tests (made-up receipts per app)
-            ├── api.js            fetch helpers for the three endpoints
-            └── format.js         ₹ formatting, datetime-local helpers
+            ├── api.js            fetch helpers for every endpoint
+            ├── auth.jsx          session context, RequireAuth
+            └── format.js         ₹ formatting, dates, download helper
 ```
 
-Git-ignored: `Dataset/`, `*.csv`, virtual environments, `node_modules/`, `frontend/dist/`, `.vercel/`, `.env*`, editor folders.
+Git-ignored: `Dataset/`, `*.csv`, virtual environments, `node_modules/`, `frontend/dist/`, `.vercel/`, `.env*`, editor folders, local `backend/*.db`.
 
 ---
 
@@ -611,12 +724,16 @@ The look is "paper and ink", modelled on bank receipts and ledgers rather than g
 
 - **Screenshots never leave the device.** OCR runs in the browser (WebAssembly), and only the confirmed numeric fields are sent to the API.
 - **Third-party requests:** on first OCR, Tesseract.js downloads its worker, WebAssembly core and English language data from public CDNs, and the page loads fonts from Google Fonts. No image or transaction data goes to either.
-- **Not sent to the API, never stored:** the reference details (transaction ID, names, UPI IDs) stay in the browser.
-- **No persistence:** there is no database, no logging of requests by the app, no accounts and no cookies.
-- **Input validation:** Pydantic constrains every field (types, ranges, finite numbers, allowed values). Invalid input returns HTTP 400 with a short message, never a stack trace.
+- **The anonymous checker stores nothing:** without an account, the reference details (transaction ID, names, UPI IDs) stay in the browser and nothing is written to the database.
+- **With an account:** saved transactions, cases, notes, alerts and reports are stored and visible only to that account ([§18](#18-accounts-sessions-and-access-control)). Export, deletion and automatic retention are in Settings.
+- **Never requested or stored:** UPI PIN, OTP, CVV, card numbers or bank passwords. No request schema has such a field (a test checks the whole OpenAPI schema), and evidence and notes are passed through `redact.py`, which masks OTP/PIN/CVV digits and card numbers before saving.
+- **AI:** opt-in, consent per user, daily limit, and only the records its tools return are sent to the Claude API ([§26](#26-ai-investigator)).
+- **Community reports:** others see only distinct-reporter counts per category; reporters and descriptions are never shown ([§22.5](#225-community-reports)).
+- **Input validation:** Pydantic constrains every field (types, ranges, finite numbers, allowed values, UPI ID and reference formats). Invalid input returns HTTP 400 with a short message, never a stack trace. Request bodies over 1 MB are rejected with 413.
+- **Headers:** `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` (camera only for this site), HSTS on Vercel, `Cache-Control: no-store` on API responses, and a Content-Security-Policy that allows only this site plus the OCR CDNs and Google Fonts. The CSP is identical in FastAPI and `vercel.json` (checked by a test) and was verified against real in-browser OCR.
 - **CORS** is restricted to the dev origin. On Vercel, the UI and API share one origin.
-- **Secrets:** the only secrets are the three Vercel values stored as GitHub repository secrets for the deploy job. Pull requests from forks don't receive them, so they can't deploy.
-- **Not production-hardened:** there is no authentication or rate limiting. Vercel provides HTTPS. A public deployment can be called by anyone, which is acceptable here because it stores nothing and holds no user data.
+- **Secrets:** `SECRET_KEY`, `DATABASE_URL` and the optional `ANTHROPIC_API_KEY` are Vercel environment variables; the three deploy values are GitHub repository secrets. Pull requests from forks don't receive them, so they can't deploy.
+- **Rate limiting:** login is throttled in the database (5 failures per email per 15 minutes) and AI questions are capped per user per day. General request rate limiting is left to the hosting platform (in-memory counters don't work across serverless instances).
 
 ---
 
@@ -683,7 +800,20 @@ In development only Vite needs to listen on the network. API calls from the phon
 | Vercel build, function, routing | `vercel.json` | see [§13.6](#136-deployment-vercel-and-cicd) |
 | Deploy credentials | GitHub repository secrets | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` |
 
-The app itself uses no environment variables.
+**Environment variables** ([config.py](../backend/app/config.py)):
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `DATABASE_URL` | In production | local `backend/upi_guard.db` (SQLite); `/tmp` SQLite on Vercel previews | Postgres connection string (`postgres://` and `postgresql://` are both accepted) |
+| `SECRET_KEY` | In production | random per process (sessions end on restart) | Signs session cookies; use a long random value |
+| `ANTHROPIC_API_KEY` | No | unset (AI disabled) | Enables the AI investigator |
+| `AI_MODEL` | No | `claude-opus-5-5` | Claude model for the AI investigator |
+| `AI_DAILY_LIMIT` | No | 20 | AI questions per user per day |
+| `SESSION_DAYS` | No | 7 | Session cookie lifetime |
+| `MAX_BODY_BYTES` | No | 1,000,000 | Request size limit |
+| `MAX_IMPORT_ROWS` | No | 2,000 | CSV rows per import |
+
+Production is detected from `VERCEL_ENV=production` (or `APP_ENV=production`); missing `DATABASE_URL` or `SECRET_KEY` then stops the app at start-up instead of silently losing data.
 
 ### 13.6 Deployment (Vercel) and CI/CD
 
@@ -692,8 +822,10 @@ The app itself uses no environment variables.
 | Part | How |
 |---|---|
 | Frontend | `installCommand: npm --prefix frontend ci`, `buildCommand: npm --prefix frontend run build`, `outputDirectory: frontend/dist` (static files on Vercel's CDN) |
-| API | `api/index.py` is a Python serverless function. It adds `backend/` to `sys.path` and exposes `app.main.app` (ASGI). `includeFiles: backend/app/**` ships the code, `trees.json` and `meta.json`; `fraud_model.txt` is excluded. Dependencies come from the root `requirements.txt` (FastAPI only). `maxDuration: 10` s |
-| Routing | Rewrite `/api/(.*)` → `/api/index`. FastAPI still sees the original path, such as `/api/predict` |
+| API | `api/index.py` is a Python serverless function. It adds `backend/` to `sys.path` and exposes `app.main.app` (ASGI). `includeFiles: backend/app/**` ships the code, `trees.json` and `meta.json`; `fraud_model.txt` is excluded. Dependencies come from the root `requirements.txt` (FastAPI, SQLAlchemy, psycopg, anthropic). `maxDuration: 60` s, for AI questions |
+| Routing | Rewrite `/api/(.*)` → `/api/index` (FastAPI still sees the original path, such as `/api/predict`), then every other path → `/index.html` so client-side routes work on reload. Static files are served first |
+| Headers | Security headers and CSP for every path ([§12](#12-privacy-and-security)) |
+| Database | Postgres from any provider (e.g. Neon or Vercel Postgres) via `DATABASE_URL`. Tables are created on start-up if missing; connections aren't pooled across invocations (`NullPool`) |
 | Git integration | `git.deploymentEnabled: false`: Vercel doesn't auto-deploy on push; GitHub Actions does, after the tests pass |
 
 **Pipeline** ([.github/workflows/ci-cd.yml](../.github/workflows/ci-cd.yml)), triggered by a push or pull request to `main`, or by hand:
@@ -716,7 +848,7 @@ flowchart LR
 
 The workflow cancels in-progress runs for the same branch and has read-only repository permissions.
 
-**One-time setup:** see "Deployment" in the [README](../README.md#deployment-vercel-with-cicd-on-github-actions). In short: `npx vercel login` and `npx vercel link` once, create a token, and add `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (from `.vercel/project.json`) as repository secrets.
+**One-time setup:** see "Deployment" in the [README](../README.md#deployment-vercel-with-cicd-on-github-actions). In short: `npx vercel login` and `npx vercel link` once, create a token, and add `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (from `.vercel/project.json`) as repository secrets. For UPI Guard, also create a Postgres database and set `DATABASE_URL` and `SECRET_KEY` (and optionally `ANTHROPIC_API_KEY`) as Vercel environment variables before the first production deploy.
 
 **Runtime behaviour.** A cold start loads FastAPI and the trees (about 0.25 s for the model). A warm request scores in about 30 ms. The OCR still runs in the visitor's browser, so the function only receives numbers.
 
@@ -727,7 +859,7 @@ The workflow cancels in-progress runs for the same branch and has read-only repo
 ### 14.1 Automated tests (run in CI on every push and pull request)
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 18 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 151 tests
 cd frontend && npm test                                                  # 8 tests
 ```
 
@@ -735,6 +867,10 @@ cd frontend && npm test                                                  # 8 tes
 |---|---|---|
 | `backend/tests/test_predictor.py` | 3 | Pure-Python probabilities match LightGBM to 1e-12 and SHAP to 1e-9 on 320 rows; contributions sum to the raw score |
 | `backend/tests/test_api.py` | 15 | `/api/model-info` shape; all 10 sample transactions score as labelled (low / high) with 1–4 reasons; an emptied account at 3 AM is high risk with the "entire balance" reason; amount > balance and an invalid type return readable 400s; all 7 received-money rule cases; an invalid answer returns 400; `api/index.py` exposes the same routes |
+| `backend/tests/test_engine.py` | 21 | Each pattern fires on its case and not on near-misses, never on too little history, and only looks backwards in time; noisy-OR properties; the model calibration keeps its thresholds; with no history the unified level equals `/api/predict` (backward compatibility); the breakdown sums to the score; balance depletion isn't double-counted; reputation alone never reaches high; history can't suppress a serious signal |
+| `backend/tests/test_scanners.py` | 53 | 11 scam message types (English, Hinglish, Devanagari) and a benign message; 10 URL verdicts, malformed URLs, punycode, secret parameters; QR parsing, receive-trick and invalid payee; UPI ID validation including injection-like strings and lure words without false positives on names; OTP/PIN/card redaction; scanner API limits |
+| `backend/tests/test_platform.py` | 52 | Sign-up, login, logout, cookie flags, throttling, tampered sessions; create / validate / search / review / delete; another user gets 404 on every ID-based endpoint; CSV import with errors and missing columns; bulk rows explained on first view; notes; case workflow and incident report with masked secrets; community reports aggregate-only and withdrawable; reports feed the risk score; alerts; all 9 scenarios detected; demo data, graph cycles and device flags; live stream; settings, export, retention, account deletion; model monitoring; security headers, size limit, unknown API paths, CSP parity, CORS; no credential fields anywhere in the API schema |
+| `backend/tests/test_ai.py` | 7 | Consent required; not configured → 503; the tool loop feeds real stored evidence back and verifies citations (unknown IDs flagged); tools can't read another user's data; unknown tools return errors; daily limit; status |
 | `frontend/src/lib/ocrParse.test.js` | 8 | Paytm received, PhonePe received, Google Pay sent, BHIM sent (modelled on real OCR output, with made-up names and numbers), GPay received heading, PhonePe "Paid to", failed status with lakh grouping, and nulls for unrecognisable text |
 | CI runtime check | 1 | The API scores correctly in a venv with only the deployed dependencies |
 | CI smoke test | 1 | After a production deploy, the live API answers `model-info` and scores an emptied account as high risk |
@@ -747,13 +883,16 @@ cd frontend && npm test                                                  # 8 tes
 | Data filter | Profiled the dropped rows: 2,488,650 rows, 45 frauds, legit balances never add up |
 | OCR on real receipts | Tesseract.js with the app's settings on four real receipts (one per app), every field correct |
 | Full app | Headless Edge via the Chrome DevTools Protocol: upload each receipt into the real file input, wait for OCR, read the form, answer questions or enter a balance, submit, and screenshot in light, dark and 390 px mobile |
-| Deployment size | Linux packages measured: with LightGBM ~190 MB unpacked; runtime-only venv ~25 MB |
+| Deployment size | Linux packages measured: with LightGBM ~190 MB unpacked; runtime-only (FastAPI, SQLAlchemy, psycopg, anthropic) ~56 MB |
+| Platform UI | Headless Edge against the production build on a throwaway database: sign up through the form, load demo data, open the highest-risk investigation, open a case and its report, network graph, simulator, alerts with the live stream, scanners, learn, emergency, settings, model and reports, in light, dark and 390 px mobile. Recorded zero JavaScript errors, zero failed API calls and no horizontal overflow |
+| CSP | Real GPay receipt uploaded under the CSP: OCR completed and filled the form with no policy violations |
 
 ### 14.3 Gaps
 
 - No test checks that `train_model.build_features` and `fraud.build_row` produce identical vectors.
-- No browser test runs in CI, so OCR on real images is checked by hand.
-- The first real Vercel deployment has to be checked after the secrets are added; the smoke test then runs on every production deploy.
+- No browser test runs in CI, so OCR on real images and the platform UI are checked by hand (the walkthrough script isn't in the repo).
+- The AI investigator is tested with a fake client; a real Claude call needs an API key and was not run.
+- The first real Vercel deployment (with Postgres) has to be checked after the secrets and environment variables are added; the smoke test then runs on every production deploy.
 
 ---
 
@@ -769,6 +908,12 @@ cd frontend && npm test                                                  # 8 tes
 - **The runtime predictor supports what this model uses:** a binary objective and numerical splits. A categorical feature or another objective would need `predictor.py` extended (the export asserts this, and the parity test would fail).
 - **Serverless cold starts:** the first request after a quiet period also loads the function (typically a second or two on Vercel).
 - **Hard-coded numbers in the UI:** "63.6 lakh" and "99.5%" must be updated by hand after retraining with different filters.
+- **Pattern weights and thresholds are hand-set**, not learned; there's no labelled real data to fit them. They are documented in [§19](#19-pattern-engine) and covered by tests.
+- **Patterns need history:** new-recipient, unusual-amount and unusual-hour checks stay silent until there are 5, 8 and 10 earlier transactions.
+- **The graph sees only the user's own payments.** Fan-in, fan-out and circular flows between other accounts appear only in the synthetic demo data.
+- **Community reports are unmoderated:** there's no moderator role, so `REVIEWED` is never set; users can only withdraw or dispute their own reports.
+- **Schema changes:** tables are created with `create_all`; there are no migrations yet (Alembic would be the next step before changing columns).
+- **The live stream** is a browser timer, so it only runs while the Alerts page is open.
 
 ---
 
@@ -780,6 +925,229 @@ cd frontend && npm test                                                  # 8 tes
 | Add a model feature | `FEATURES` and `build_features` in `train_model.py`, `build_row` (and `GROUPS` / `explain` wording) in `fraud.py`, `feature_row` in `tests/test_predictor.py`; retrain and commit the three model files |
 | Add a Python dependency to the API | Root `requirements.txt` (deployed) and `backend/requirements.txt` (local); keep it small, and the CI runtime check will catch a missing one |
 | Change risk bands | Threshold logic in `train_model.py` (retrain) or `thresholds` in `meta.json` |
-| Add a received-money rule | `check_received` in `received.py`, the question in `TransactionForm.jsx` `QUESTIONS`, the form field in `App.jsx` `EMPTY_FORM`, and the schema in `ReceivedPayment` |
-| New API endpoint | Route in `main.py`, schema in `schemas.py`, helper in `frontend/src/lib/api.js` |
-| Change colours or type | Tokens at the top of `styles.css`; fonts in `index.html` |
+| Add a received-money rule | `check_received` in `received.py`, the question in `TransactionForm.jsx` `QUESTIONS`, the form field in `pages/Check.jsx` `EMPTY_FORM`, and the schema in `ReceivedPayment` |
+| New API endpoint | A router module in `app/routes/` (scope every query to `current_user`), include it in `main.py`, add a helper in `frontend/src/lib/api.js`, and add an access-control test |
+| Add a history pattern | A detector in `engine/patterns.py` returning a `Pattern` with evidence and a weight; tests in `test_engine.py`; add its code to `ALERT_PATTERNS` in `services.py` if it should alert |
+| Add a scam-message indicator | A tuple in `INDICATORS` in `engine/message.py` and a case in `test_scanners.py` |
+| Add a simulator scenario | An entry in `_scenarios()` in `engine/simulator.py`; the parametrised test checks it is detected |
+| Change the AI model or limits | `AI_MODEL` / `AI_DAILY_LIMIT` environment variables |
+| Change colours or type | Tokens at the top of `styles.css`; fonts in `index.html`; platform pages in `platform.css` |
+
+---
+
+# Part II: UPI Guard platform
+
+## 17. Platform architecture and data model
+
+The original checker (§1–§16) stays as it was: `/api/predict`, `/api/check-received` and `/api/model-info` need no account and store nothing. Everything that remembers data is new, lives in `app/routes/`, and needs a signed-in user.
+
+**Layers:**
+
+| Layer | Modules | Notes |
+|---|---|---|
+| Engines (pure functions) | `engine/patterns.py`, `risk.py`, `message.py`, `urls.py`, `qr.py`, `upi.py`, `graph.py`, `simulator.py`, `csv_import.py`, `redact.py`, `guidance.py` | No database access; unit-tested directly |
+| Services | `services.py` | Per-user history, scoring, alerts, related transactions, rescoring, reporter counts |
+| Routes | `routes/*.py`, `auth.py` | Validation, ownership checks, audit logging |
+| Storage | `db.py`, `models.py` | SQLAlchemy 2; Postgres in production, SQLite locally and in tests |
+
+**Tables** ([models.py](../backend/app/models.py)). Every user-owned row has `user_id` with `ON DELETE CASCADE`.
+
+| Table | Key columns | Purpose |
+|---|---|---|
+| `users` | email (unique, lower-case), password_hash (scrypt), display_name, settings (JSON: ai_consent, notifications, demo_mode, retention_days) | Accounts |
+| `transactions` | occurred_at, direction (sent / received / cash_out), amount, counterparty_name / _upi, payment_app, status, external_id (UTR), balance_before / _after, receiver balances, device_id, location, category, note, received_answers (JSON), source (manual / screenshot / csv / demo / simulator / stream), is_synthetic, risk_score, risk_level, risk (JSON breakdown), review_status | The user's history, one payment from their point of view ("counterparty" is the other party) |
+| `cases` (+ `case_transactions`) | title, status, priority, resolution, evidence (JSON list) | Investigations grouping transactions and evidence |
+| `notes` | transaction_id or case_id, text | Investigation notes |
+| `entity_reports` | entity_type (upi / phone / url), entity_value (normalised), category, amount, incident_date, description (private), status | Community reports |
+| `alerts` | transaction_id, kind, severity, title, body, read | In-app alerts |
+| `audit_logs` | user_id (kept after deletion), action, detail (JSON) | Sign-ups, logins, imports, exports, deletions, consent changes, reports, AI questions |
+| `login_attempts` | email, success | Login throttling |
+
+The spec's separate `fraud_events`, `risk_scores`, `investigations` and scan tables are folded in: pattern codes double as fraud-event types and live in `transactions.risk` with their evidence; the investigation view is computed on request; scans aren't stored (they can be saved as case evidence).
+
+## 18. Accounts, sessions and access control
+
+[auth.py](../backend/app/auth.py) uses only the standard library:
+
+- **Passwords:** at least 10 characters, hashed with `hashlib.scrypt` (n = 2^14, r = 8, p = 1, 16-byte random salt), compared in constant time.
+- **Sessions:** a token `base64(payload).base64(HMAC-SHA256)` in the cookie `upig_session`, which is HttpOnly, `SameSite=Strict`, Secure over HTTPS, and lasts 7 days. The payload holds the user ID, expiry and a fingerprint of the password hash, so deleting the account (or a future password change) invalidates every session. The signing key is `SECRET_KEY`.
+- **Throttling:** 5 failed logins per email within 15 minutes → HTTP 429.
+- **CSRF:** `SameSite=Strict` cookies plus JSON-only APIs and a restricted CORS policy.
+- **Access control:** every route that takes an ID loads the row and checks `user_id`. "Not found" and "not yours" both return **404**, so IDs can't be probed. Tested for every ID-based endpoint.
+- **Audit log:** security-relevant actions are recorded with the numeric user ID only.
+
+Endpoints: `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`.
+
+## 19. Pattern engine
+
+[patterns.py](../backend/app/engine/patterns.py) compares a transaction with the user's **earlier** transactions only (later ones are ignored, ties broken by ID). Each detector returns a `Pattern` with a code (doubling as the fraud-event type), title, plain-English detail, weight, severity and the evidence it used.
+
+| Code | Fires when | Weight | Needs history |
+|---|---|---|---|
+| `RAPID_TRANSFER` | 3+ outgoing payments within 5 minutes | 0.50 (0.65 if the total ≥ ₹50,000) | No |
+| `TRANSACTION_BURST` | 6+ transactions within an hour (when rapid transfers didn't fire) | 0.35 | No |
+| `BALANCE_DEPLETION` | Outgoing payment ≥ 90% of the balance before | 0.60 (informational when the model ran) | No |
+| `NEW_RECIPIENT` | First outgoing payment to this UPI ID / name | 0.25 | 5 earlier transactions |
+| `UNUSUAL_AMOUNT` | Amount > 95th percentile **and** ≥ 5× the median of earlier outgoing payments | 0.40 | 8 earlier outgoing |
+| `UNUSUAL_HOUR` | Between 00:00 and 05:59 and < 5% of earlier transactions within ±1 hour | 0.30 | 10 earlier |
+| `RECIPIENT_CONCENTRATION` | 3+ payments in 24 h to a recipient first paid within those 24 h | 0.50 | No |
+| `REFUND_LOOP` | Paying someone who paid you in the last 72 hours (wrong-transfer / fake-refund pattern) | 0.45 | No |
+| `NEW_DEVICE` | A device ID not seen in 3+ earlier transactions that recorded devices | 0.35 | 3 earlier |
+| `LARGE_AMOUNT` | Outgoing ≥ ₹1,00,000 | 0.20 | No |
+
+The weights are hand-set to reflect how strongly each pattern alone points to fraud. `baseline()` summarises the user's normal behaviour (history count, median, 10th–90th percentile range, most common hours, known counterparties), which the investigation page shows next to the patterns.
+
+## 20. Unified risk engine
+
+[risk.py](../backend/app/engine/risk.py) combines four independent sources of evidence, keeping each one visible.
+
+1. **Common scale.** Each source produces a score in [0, 1], where 0.35 means medium and 0.70 means high:
+   - **Model:** the LightGBM probability mapped piecewise so its validated thresholds (0.0695, 0.2778) land exactly on 0.35 and 0.70.
+   - **Rules** (received money, when the three questions are answered): low 0.15, medium 0.50, high 0.85.
+   - **Patterns:** noisy-OR of the fired patterns' weights, capped at 0.90.
+   - **Reputation:** distinct users who reported the counterparty: 1 → 0.20, 2 → 0.35, 3+ → 0.45. Unverified reports alone can never make a payment high risk.
+2. **Combination:** final = 1 − Π(1 − sᵢ) (noisy-OR, treating sources as independent evidence). It is never below the strongest source, adding evidence can only raise it, and with a single source the level is unchanged. So a payment with no history gets exactly the level `/api/predict` gives it (tested).
+3. **Level:** high ≥ 0.70, medium ≥ 0.35, otherwise low. Shown as a 0–100 score.
+4. **Breakdown:** sources are applied strongest first and the points each adds are recorded, summing to the score. The UI shows this as "why risk increased" (+65 rapid transfers, +14 unusual amount, …).
+5. **No double counting:** balance depletion is the model's strongest feature, so when the model ran the pattern is shown for context but not scored.
+
+The engine never lowers risk because of history: repeated legitimate payments only mean that "new recipient" stops firing. A serious model or rule signal always stands.
+
+**Stored result** (`transactions.risk`): `version` (`risk-v1`), `score`, `points`, `level`, `components` (model, rules, patterns, reputation, each with its own score, level and reasons), `breakdown`, `reasons`, `baseline`, `notes` and `assessed_at`.
+
+**Performance.** Full scoring with TreeSHAP takes about 30 ms per transaction. Bulk paths (CSV import, demo data, rescoring) score with the fast probability-only path and sort the history once, scoring each row against the prefix before it. The SHAP reasons are computed and saved the first time a transaction's investigation is opened.
+
+## 21. Transactions, CSV import and investigation
+
+[routes/transactions.py](../backend/app/routes/transactions.py)
+
+- **Create** (`POST /api/transactions`): validates the fields (UPI ID `name@handle`, reference `[A-Za-z0-9-]{4,64}`, finite non-negative amounts, length limits), scores the transaction against the user's history and creates alerts. The checker's "Save & investigate" button uses this; masked receipt IDs (`••••0259@ptsbi`) are kept as the name only.
+- **List** (`GET /api/transactions`): search (name, UPI ID, reference, note) plus filters for risk, direction, app, review status, amount range, date range and synthetic data; sorting by newest, oldest, risk or amount; pagination (≤ 200 per page). The query is parameterised by SQLAlchemy, so injection strings are just text (tested).
+- **CSV import** (`POST /api/transactions/import`, body `{csv}`, ≤ 900 KB, ≤ 2,000 rows): column names are matched loosely (`date` / `timestamp` / `txn date`, `type` / `dr/cr`, `amount (inr)`, `upi id` / `vpa`, `utr` / `reference`, `closing balance`, …); directions accept sent / received / cash_out and debit / credit / DR / CR; there are 17 date formats (ISO, DD/MM/YYYY, "03 Oct 2026, 12:48 AM", …). Bad rows are skipped and reported with line numbers; good rows are imported and the whole history is rescored.
+- **Review** (`PATCH /api/transactions/{id}`): unreviewed, legitimate, suspicious or confirmed_fraud. Only the user can mark something as confirmed fraud.
+- **Investigation** (`GET /api/investigations/{id}`): the transaction with its full risk breakdown (SHAP computed on first view), a 24-hour timeline either side, same-counterparty and same-hour transactions, the counterparty profile (UPI ID check, totals, first seen, community reports), notes and linked cases. Notes: `POST /api/investigations/{id}/notes` (secrets masked).
+- **Retention:** if the user set a retention period, older transactions are deleted when settings change and whenever the history is listed.
+
+## 22. Scam intelligence
+
+The scanners work without an account and store nothing. Signed-in users also get their own history folded into the QR and UPI checks.
+
+### 22.1 Message scanner ([message.py](../backend/app/engine/message.py))
+
+There are 13 rule-based indicators, each with a category, weight and explanation: OTP / PIN / CVV / password requests (0.75), "enter PIN to receive" (0.70), remote-access apps (0.70), digital arrest / authority impersonation (0.60), KYC threats (0.50), wrong-transfer requests (0.50), prizes (0.45), job / task (0.45), investment (0.45), bill disconnection (0.45), account threats (0.35), urgency (0.20) and calling a number (0.15). Patterns cover English, Hinglish ("otp bhejo", "band ho jayega", "galti se", "wapas bhej do") and common Hindi / Marathi words (ओटीपी, खाता बंद, केवाईसी, इनाम, लॉटरी). Links found in the text go through the URL checker, and a brand name used together with a threat or link adds an impersonation indicator. The scanner also extracts links, UPI IDs, phone numbers, amounts and brand names. Scores combine by noisy-OR into low / medium / high; with no indicators the result says "no known scam indicators", never "safe".
+
+### 22.2 Link checker ([urls.py](../backend/app/engine/urls.py))
+
+It **never fetches the URL** (no redirects followed, no server-side request forgery risk). Signals: `javascript:` / `data:` schemes (0.8), a demo block list of fictional `.example` domains (0.8), brand name on a non-official domain (0.55), `@` in the address (0.5), OTP / PIN parameters (0.5), raw IP host (0.45), punycode (0.4), unusual scheme (0.3), shorteners (0.25), cheap TLDs (0.25), lure words (≤ 0.3), long or nested host (0.15), plain http (0.1) and community reports (≤ 0.45). Official domains include known bank, payment-app and government domains plus any `.bank.in` (RBI-restricted to regulated banks since October 2025), `.gov.in` or `.nic.in` host.
+
+Verdicts: **HIGH RISK** ≥ 0.70, **SUSPICIOUS** ≥ 0.35, **SAFE** only for an official domain with no warning signs, otherwise **UNKNOWN**. A single weak signal, like a shortener, gives UNKNOWN, as the spec requires. The basis is always shown.
+
+### 22.3 QR / UPI-link checker ([qr.py](../backend/app/engine/qr.py))
+
+QR images are decoded in the browser with jsQR (from an upload, or the camera over HTTPS); only the decoded text is sent. `upi://pay?pa=&pn=&am=&cu=&tn=&tr=&mc=` follows NPCI's linking specification. Warnings: invalid or missing payee (0.75), a note promising a refund or cashback ("scanning always sends money", 0.6), a non-`pay` action such as a mandate (0.45), lure words in the payee name or ID (0.4), pre-filled amount (0.1, or 0.25 at ₹50,000 or more), non-INR currency (0.2), new recipient for this user (0.15) and community reports. Web-link QRs go through the link checker; plain text is reported as not a payment.
+
+### 22.4 UPI ID checker ([upi.py](../backend/app/engine/upi.py), `GET /api/upi/{vpa}`)
+
+It checks the format (`[a-z0-9][a-z0-9._-]{1,255}@[a-z][a-z0-9]{1,63}`) and maps about 30 well-known handles to an app and bank, best effort and labelled as not an official list (e.g. `@ybl` / `@ibl` / `@axl` → PhonePe, `@okaxis` / `@okhdfcbank` / `@okicici` / `@oksbi` → Google Pay, `@paytm` / `@pt*` → Paytm, `@upi` → BHIM). Malformed IDs never get an app or bank. Lure words ("kyc", "refund", "support", "cashback", bank names…) are matched as substrings when long and as whole tokens when short, so names like "oscar" or "taxila" aren't flagged. An unknown handle is information, not a warning. The response adds community report counts and, for signed-in users, their own history with the ID.
+
+### 22.5 Community reports
+
+`POST /api/entity-reports` (UPI ID, 10-digit mobile number or link host; category from 13 scam types; optional amount, date (not in the future) and a private description). Values are normalised so reports aggregate. Other users only ever see **the number of distinct reporters per category**: never who reported it or what they wrote. Reporters can set their report to pending, confirmed by me, disputed, or removed (withdrawn); removed reports stop counting. Reports feed the unified risk engine's reputation source and the link / QR / UPI checks. All of this is labelled unverified and not an official NPCI or bank list.
+
+## 23. Cases, evidence, incident reports and alerts
+
+- **Cases** ([routes/cases.py](../backend/app/routes/cases.py)): title, status (OPEN → INVESTIGATING → ESCALATED → RESOLVED / FALSE_POSITIVE), priority, resolution, linked transactions (only the user's own), notes and evidence. Evidence items (message, link, QR payload, UPI ID, screenshot details, note) are metadata ≤ 8 KB, up to 100 per case. **Images aren't stored**, and text passes through `redact.py`, which masks digits next to OTP / PIN / CVV / password words and card-number-like sequences.
+- **Incident report** (`GET /api/cases/{id}/report`): built only from stored data, with no generated text. Sections: case, transaction summary, risk assessment (per transaction: score, level, breakdown, review status), model evidence (SHAP reasons, computed if missing), rule evidence, pattern evidence, a timeline merging transactions, evidence and notes, related entities (with app and community report counts), evidence, notes, recommended next steps, official resources and a disclaimer (plus a synthetic-data notice when relevant). The frontend renders it as a printable page ("Save as PDF" via the browser) and offers JSON download.
+- **Guidance** ([guidance.py](../backend/app/engine/guidance.py), `GET /api/guidance`): five emergency steps and official channels: 1930 and cybercrime.gov.in when money is lost, Sanchar Saathi Chakshu for suspected fraud calls and SMS, and the RBI complaint system when a bank doesn't resolve a complaint in 30 days. The app states it can't freeze accounts or recover money.
+- **Alerts** ([routes/alerts.py](../backend/app/routes/alerts.py)): created when a scored transaction is high risk (or its alerting patterns fire: rapid transfers, recipient concentration, refund loop, burst, new device). They are worded as "High-risk transaction detected", never "fraud". List, mark read, mark all read; the top bar shows the unread count (polled every 30 s). Browser notifications are opt-in, titled "UPI Guard (demo)", and shown only while the app is open.
+
+## 24. Relationship graph
+
+[graph.py](../backend/app/engine/graph.py) builds the graph from the user's own transactions and keeps it separate from the classifier.
+
+- **Nodes:** you, counterparties (UPI ID or name), devices, locations. Each has its transaction count, total, highest risk level, community report count and a synthetic flag.
+- **Edges:** `SENT` / `RECEIVED` (aggregated with count, total and highest risk), `USED_DEVICE`, `AT_LOCATION`, and for the synthetic demo dataset only, `OBSERVED_FLOW` between demo counterparties: third-party flows a real user can't see (a mule ring that forwards the takeover money and loops back).
+- **Analysis:** fan-in and fan-out (3+ distinct sources or destinations), directed cycles up to length 5 (circular money movement, each reported once), devices flagged only when **most** of their payment edges are risky (so the user's everyday phone isn't accused because of one bad payment), community reports, and suspicious clusters (connected components of risky or flagged nodes, via union-find). Flags are phrased as patterns, not proof.
+- **Endpoints:** `GET /api/network` (optional `min_risk`, `include_demo`), `GET /api/network/entity/{id}` and `GET /api/network/transaction/{id}`, which return a two-hop subgraph.
+- **UI:** a d3-force layout computed once and fitted to the frame; SVG with pan, zoom and reset; click or keyboard selection; arrow and width by amount; circular flows highlighted; labels shown for you, flagged and selected nodes (all nodes have tooltips and ARIA labels); and a text list of flagged entities for screen readers.
+
+## 25. Simulator, demo data and live stream
+
+[simulator.py](../backend/app/engine/simulator.py). **All data is synthetic**: invented names and UPI IDs, links on the reserved `.example` domain, and every row flagged `is_synthetic` and labelled "SYNTHETIC DEMO DATA — NOT REAL BANK DATA".
+
+- **Baseline:** 45 days of normal activity (salary on the 1st, four monthly bills, 0–3 daytime payments a day to seven everyday payees, running balances), with a fixed seed per scenario so runs repeat exactly.
+- **Nine scenarios** (`POST /api/simulator/run`, stateless): account takeover, fake refund, KYC scam, wrong-transfer scam, fake customer support, investment / task scam, QR scam, phishing link and fake payment screenshot. Each scripted step goes through the **same engines** as real input: payments through the unified risk engine against the baseline plus earlier steps; messages, links and QR payloads through their scanners. The result is a timeline with each step's level, score, signals and breakdown, plus the set of detected signals. Nothing in a scenario is hard-coded as detected. A test checks all nine reach at least medium; the account takeover detects new device, rapid transfers, model risk, unusual amount and time, and balance depletion.
+- **Demo dataset** (`POST /api/demo/load`, `DELETE /api/demo`): about 90 days of normal activity with an investment scam, a fake refund and a night-time account takeover from a new device embedded, loaded into the user's own history and scored. It can be removed in one click. The simulated Account Aggregator flow in Settings uses the same dataset.
+- **Live stream** (`POST /api/simulator/stream/next`): one synthetic payment per call (75% everyday, 15% "instant loan" desks, 10% a mule transfer from the new device), scored against the user's history and alerted. The Alerts page calls it every 5 seconds while live mode is on, because Vercel functions can't hold an SSE or WebSocket connection open.
+
+## 26. AI investigator
+
+[routes/ai.py](../backend/app/routes/ai.py) is an AI layer that explains evidence the deterministic system already produced. It never decides fraud on its own.
+
+- **Opt-in:** the user enables it in Settings (consent is audit-logged) and every request repeats `consent: true`. Without `ANTHROPIC_API_KEY` the feature reports "not configured" (503) and the rest of the app works.
+- **Model and request:** `claude-opus-5-5` by default (`AI_MODEL`), effort `low` for interactive latency, the server-side refusal fallback (`fallbacks: "default"`), the system prompt marked for prompt caching, `max_tokens` 4,000, a 40 s client timeout with 1 retry, up to 6 tool rounds and a 50 s overall deadline (the function's limit is 60 s).
+- **Tools** (strict JSON schemas, all scoped to the signed-in user): `get_transaction` (facts plus the full risk breakdown, computing SHAP if needed), `search_transactions` (amount, direction, risk, counterparty, pattern code, date range, sort, ≤ 50 rows), `get_related`, `get_case`, `get_profile` (baseline, risk counts, top counterparties) and `check_upi`. A record belonging to another user returns "not found", the same as a missing one.
+- **No invented facts:** the system prompt requires every fact to be cited as `[tx#ID]` or `[case#ID]` and forbids guessing or calling anyone a criminal. After the answer, the server checks each citation against the IDs the tools actually returned in this request: verified ones become evidence links, and unknown ones are marked "not found in your data" and listed as unverified.
+- **Conversation:** up to 6 earlier text turns are resent (no tool history); the tool loop appends content unchanged.
+- **Errors:** rate limit → 429, timeout → 504, connection or API error → 502, refusal → a polite decline. The per-user daily limit (default 20) is counted from the audit log.
+- **Not built:** free-form SQL or database access for the model, and storing AI answers.
+
+## 27. Frontend application
+
+React Router with an auth context (`/api/auth/me` on load). Pages that need an account redirect to `/login?next=…`; the `next` value is only accepted as a same-site path.
+
+| Route | Page | Account |
+|---|---|---|
+| `/` | Landing: hero, how it works, what you can check, explanations, Privacy First, demo, emergency | No |
+| `/check` | The original checker (screenshot OCR, form, result slip, model info) plus "Save & investigate" | No (saving needs one) |
+| `/scan?tab=message\|url\|qr\|upi` | Scanners; the spec's `/message-scanner`, `/url-checker`, `/qr-scanner` and `/upi-check` redirect here | No |
+| `/simulator` | Scenario list and animated timeline (instant with reduced motion) | No |
+| `/learn`, `/emergency`, `/privacy`, `/model` | Scam cards and quiz; emergency steps and 1930 button; privacy notes; model monitoring | No |
+| `/transactions` | History: search, filters, CSV import, demo data | Yes |
+| `/investigate/:id` | Score and breakdown, model / rule / pattern evidence, baseline, timeline, related, counterparty, review, case, AI panel, notes | Yes |
+| `/network` | Graph, filters, flagged list, focus mode | Yes |
+| `/alerts` | Alerts and live demo stream with notifications | Yes |
+| `/cases`, `/cases/:id`, `/cases/:id/report` | Case list, case workspace (status, evidence, notes, AI), printable incident report | Yes |
+| `/reports` | Report a UPI ID, number or link; manage your reports | Yes |
+| `/settings` | Name, AI consent, notifications, retention, export, delete history, simulated Account Aggregator, delete account | Yes |
+
+**UX rules:** risk is always text + glyph + colour (● low, ▲ medium, ■ high, ◆ unknown); synthetic data always carries a "Synthetic" tag; loading, empty and error states on every data view; a skip link, labelled controls, `aria-live` results, `aria-pressed` toggles and keyboard-reachable graph nodes; a menu button below 980 px and no horizontal scroll at 390 px. Copy says "high-risk pattern" and "potentially suspicious", never that a person is a fraudster.
+
+## 28. API reference
+
+All bodies and responses are JSON; validation errors are HTTP 400 `{"detail": "…"}`; 🔒 = needs a session cookie.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/predict` · `/api/check-received` · GET `/api/model-info` | Original checker (unchanged) |
+| POST | `/api/auth/signup` · `/login` · `/logout`, GET `/api/auth/me` | Accounts (§18) |
+| POST 🔒 | `/api/transactions` | Save and score a transaction |
+| POST 🔒 | `/api/transactions/import` | CSV import |
+| GET 🔒 | `/api/transactions` | Search / filter / sort / paginate |
+| GET / PATCH / DELETE 🔒 | `/api/transactions/{id}` | Read, review, delete |
+| POST 🔒 | `/api/transactions/rescore` | Rescore the whole history |
+| GET 🔒 | `/api/investigations/{id}` | Investigation view |
+| POST 🔒 | `/api/investigations/{id}/notes` | Add a note |
+| POST | `/api/message/analyze` · `/api/url/analyze` · `/api/qr/analyze` | Scanners |
+| GET | `/api/upi/{vpa}` | UPI ID check (history when signed in) |
+| POST / GET 🔒 | `/api/entity-reports` | Create / list own reports |
+| PATCH 🔒 | `/api/entity-reports/{id}` | Change own report status |
+| GET / POST 🔒 | `/api/cases` | List / create cases |
+| GET / PATCH / DELETE 🔒 | `/api/cases/{id}` | Read / update / delete a case |
+| POST / DELETE 🔒 | `/api/cases/{id}/transactions[/{tx}]` | Link / unlink a transaction |
+| POST 🔒 | `/api/cases/{id}/evidence` · `/api/cases/{id}/notes` | Add evidence / notes |
+| GET 🔒 | `/api/cases/{id}/report` | Incident report |
+| GET 🔒 | `/api/alerts` | Alerts (`unread_only`) |
+| POST 🔒 | `/api/alerts/{id}/read` · `/api/alerts/read-all` | Mark read |
+| GET | `/api/guidance` | Emergency steps and resources |
+| GET 🔒 | `/api/network` · `/api/network/entity/{id}` · `/api/network/transaction/{id}` | Graph |
+| GET | `/api/simulator/scenarios`; POST `/api/simulator/run` | Simulator |
+| POST / DELETE 🔒 | `/api/demo/load` · `/api/demo` | Demo dataset |
+| POST 🔒 | `/api/simulator/stream/next` | Live demo stream |
+| GET 🔒 | `/api/ai/status`; POST `/api/ai/ask` | AI investigator |
+| PATCH 🔒 | `/api/account/settings` | Consent, notifications, retention, name |
+| GET 🔒 | `/api/account/export` | Export everything |
+| DELETE 🔒 | `/api/account/data` · `/api/account` (password) | Delete history / account |
+| GET | `/api/model/monitoring` | Model metrics (+ live distribution when signed in) |
+
+Interactive docs: `/docs` (FastAPI's OpenAPI UI).

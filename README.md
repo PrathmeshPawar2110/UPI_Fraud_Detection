@@ -1,12 +1,25 @@
-# UPI Fraud Check
+# UPI Guard
 
-A web app that estimates whether a UPI transaction looks like fraud. The user uploads a payment screenshot (or types the details), confirms a few fields, and gets a risk level with plain-English reasons.
+**A UPI fraud detection, investigation and prevention platform.** It started as *UPI Fraud Check*, a single-payment checker, which is still at its core and unchanged.
+
+| | What it does |
+|---|---|
+| **Check** | Upload a GPay / PhonePe / Paytm / BHIM screenshot (read in the browser) or type the details. Get a risk level with reasons from an ML model (sent money) or rules (received money) |
+| **Detect** | Save payments or import a CSV. A pattern engine compares each one with your history: rapid transfers, new recipient, unusual amount or time, balance drain, repeated payments to a new payee, paying back a recent sender, new device |
+| **Explain** | A unified 0–100 risk score shows the points each source added: model (TreeSHAP reasons), rules, patterns, community reports |
+| **Investigate** | Timeline, related payments, counterparty profile, notes, review status, and an opt-in AI investigator (Claude) that explains the stored evidence with verified citations |
+| **Connect** | Relationship graph with flagged entities, circular money flows and suspicious clusters |
+| **Scan** | Suspicious SMS / WhatsApp messages (English, Hinglish), payment links (never opened), QR codes (camera or image) and UPI IDs |
+| **Report & act** | Cases with evidence and a printable incident report, community reports (aggregate counts only), alerts, emergency steps (1930, cybercrime.gov.in, Chakshu) |
+| **Learn & simulate** | Nine scripted scams run through the same engines on synthetic data; scam explainers with quizzes; a live demo alert stream |
+
+UPI Guard never asks for a UPI PIN, OTP or bank password, labels all synthetic data, and calls things "high-risk patterns", not proof of fraud. Every feature in the expansion spec was checked for feasibility first; what was built, adapted or deferred (and why) is in [TRD §1](docs/TRD.md#1-purpose-and-scope).
 
 The model is LightGBM trained on **PaySim**, as recommended in [data-and-scope.md](data-and-scope.md). It trains on 2,51,957 of PaySim's 63.6 lakh transactions: transfers and cash-outs where the sender's balance covers the amount, steps 1-400. The other rows hold almost no fraud: `CASH_IN`, `PAYMENT` and `DEBIT` have none, and the transfers and cash-outs where the balance doesn't cover the amount hold 45 of the 8,213 frauds (0.5%). The app can't receive those transactions anyway, because a real UPI payment can't exceed the balance.
 
-**Stack:** React 19 + Vite (`frontend/`) · FastAPI + LightGBM (`backend/`) · Tesseract.js for in-browser OCR · Vercel + GitHub Actions
+**Stack:** React 19 + Vite + React Router (`frontend/`) · FastAPI + SQLAlchemy (Postgres / SQLite) + LightGBM-exported model (`backend/`) · Tesseract.js and jsQR in the browser · Claude API (optional) · Vercel + GitHub Actions
 
-Full technical details (architecture, data, model, API, OCR parser, design system, limitations) are in the **[Technical Reference Document](docs/TRD.md)**.
+Full technical details (architecture, data model, engines, API, security, limitations) are in the **[Technical Reference Document](docs/TRD.md)**.
 
 ## Setup
 
@@ -37,6 +50,15 @@ uvicorn app.main:app --reload --reload-dir app --port 8000
 ```
 
 The API runs at http://127.0.0.1:8000. Interactive API docs are at http://127.0.0.1:8000/docs.
+
+Locally, data is stored in a SQLite file, `backend/upi_guard.db` (git-ignored), created on first start. No setup is needed. Optional environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | local SQLite file | Postgres connection string (required in production) |
+| `SECRET_KEY` | random per start (you're signed out on restart) | Signs session cookies (required in production) |
+| `ANTHROPIC_API_KEY` | unset (AI off) | Enables the AI investigator |
+| `AI_MODEL` / `AI_DAILY_LIMIT` | `claude-opus-5-5` / 20 | AI model and questions per user per day |
 
 If `uvicorn` is "not recognized", the virtual environment isn't active or the dependencies weren't installed into it. Run it through the venv's Python instead:
 
@@ -124,20 +146,24 @@ Commit all three files in `backend/app/model/`. The API serves `trees.json`, and
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 18 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 151 tests
 cd frontend && npm test                                                  # 8 OCR parser tests
 ```
 
-- **API:** model info, the 10 sample transactions score as labelled, validation errors, every received-money rule.
-- **Predictor parity:** the pure-Python model matches LightGBM's probabilities (to 1e-12) and SHAP values (to 1e-9) on 320 rows, with and without receiver balances.
-- **Vercel entry point:** `api/index.py` exposes the same app.
+- **Original checker:** model info, the 10 sample transactions score as labelled, validation errors, every received-money rule.
+- **Predictor parity:** the pure-Python model matches LightGBM's probabilities (to 1e-12) and SHAP values (to 1e-9) on 320 rows.
+- **Engines:** every history pattern and its near-misses, unified-risk properties (never below the strongest signal, model-only results unchanged, no double counting), scanners for 11 message scam types, 10 URL verdicts, QR tricks and UPI IDs, secret masking.
+- **Platform:** sign-up and sessions, login throttling, another user gets 404 on every record, CSV import, cases and incident reports, aggregate-only community reports, all 9 simulator scenarios, graph cycles, settings, export and deletion, security headers, CSP parity with `vercel.json`, no PIN / OTP fields anywhere in the API.
+- **AI investigator:** with a fake Claude client: consent, user-scoped tools, citation checking, daily limit.
 - **OCR parser:** receipts for each app with typical OCR noise (made-up names and numbers).
 
 ## Deployment (Vercel, with CI/CD on GitHub Actions)
 
 The whole app runs on Vercel: the React build as static files, and the FastAPI backend as one Python serverless function ([api/index.py](api/index.py)) under the same domain, so `/api` works with no CORS setup.
 
-**The live model runs without LightGBM.** LightGBM plus NumPy and SciPy unpack to ~190 MB, close to Vercel's function size limit, and LightGBM needs the system OpenMP library (`libgomp`). Instead, `train_model.py` exports the trees to `trees.json`, and [predictor.py](backend/app/predictor.py) runs them in pure Python: the same prediction and the same TreeSHAP explanations, checked against LightGBM in the tests. The deployed function only needs FastAPI (root [requirements.txt](requirements.txt)). It scores a request in ~30 ms.
+**The live model runs without LightGBM.** LightGBM plus NumPy and SciPy unpack to ~190 MB, close to Vercel's function size limit, and LightGBM needs the system OpenMP library (`libgomp`). Instead, `train_model.py` exports the trees to `trees.json`, and [predictor.py](backend/app/predictor.py) runs them in pure Python: the same prediction and the same TreeSHAP explanations, checked against LightGBM in the tests. The deployed function needs only FastAPI, SQLAlchemy, the Postgres driver and the Claude SDK (root [requirements.txt](requirements.txt), ~56 MB). It scores a request in ~30 ms.
+
+**Data needs Postgres in production.** Vercel's filesystem is read-only (only `/tmp`, wiped on cold start), so production stops at start-up without `DATABASE_URL`. Preview deployments without it use a throwaway SQLite database in `/tmp`.
 
 **Pipeline** ([.github/workflows/ci-cd.yml](.github/workflows/ci-cd.yml)):
 
@@ -165,7 +191,16 @@ Vercel's own Git auto-deploy is turned off in [vercel.json](vercel.json), so not
    | `VERCEL_TOKEN` | the token from step 3 |
    | `VERCEL_ORG_ID` | `orgId` from `.vercel/project.json` |
    | `VERCEL_PROJECT_ID` | `projectId` from `.vercel/project.json` |
-5. Push to `main`, or re-run the workflow from the **Actions** tab. The production URL appears on the run and in the Vercel dashboard.
+5. Create a Postgres database, e.g. a free [Neon](https://neon.tech) project or **Storage → Postgres** in the Vercel dashboard, and copy its connection string.
+6. In the Vercel project, go to **Settings → Environment Variables** and add for **Production** (and Preview if you want persistent previews):
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | the Postgres connection string |
+   | `SECRET_KEY` | a long random string, e.g. from `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+   | `ANTHROPIC_API_KEY` | optional: enables the AI investigator (billed per use, capped by `AI_DAILY_LIMIT`) |
+
+   Tables are created automatically on first start.
+7. Push to `main`, or re-run the workflow from the **Actions** tab. The production URL appears on the run and in the Vercel dashboard.
 
 Until the secrets are added, the pipeline still runs the tests and skips the deploy job with a notice.
 
@@ -178,6 +213,8 @@ To deploy by hand instead: `npx vercel` (preview) or `npx vercel --prod` (produc
 | `POST` | `/api/predict` | Score a transaction. Body: `type` (`TRANSFER` / `CASH_OUT`), `amount`, `hour` (0-23), `sender_balance_before`, and optionally `sender_balance_after`, `receiver_balance_before`, `receiver_balance_after`. |
 | `POST` | `/api/check-received` | Rule-based check for money **received**. Body: `amount`, `hour`, and `knows_sender`, `in_bank`, `asked_to_pay`, each `yes` / `no` / `unsure`. Returns the same shape with `probability: null` and `method: "rules"`. |
 | `GET` | `/api/model-info` | Test-set metrics, thresholds and example transactions. |
+
+These three need no account and are unchanged. The platform adds about 40 more endpoints (accounts, transactions, investigation, scanners, cases, alerts, network, simulator, AI, settings), listed in [TRD §28](docs/TRD.md#28-api-reference).
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/predict -H "Content-Type: application/json" \
@@ -271,27 +308,36 @@ api/index.py                         Vercel serverless entry point (imports back
 .github/workflows/ci-cd.yml          tests, then deploy to Vercel
 
 backend/
-  requirements.txt                   local API dependencies (FastAPI, uvicorn)
+  requirements.txt                   local API dependencies (FastAPI, uvicorn, SQLAlchemy, psycopg, anthropic)
   requirements-dev.txt               + pytest, httpx, lightgbm for the tests
-  app/main.py                        FastAPI app: routes, validation errors, serves frontend/dist
+  app/main.py                        FastAPI app: original endpoints, routers, security headers, SPA fallback
+  app/config.py, db.py, models.py    settings, database, tables
+  app/auth.py                        accounts and signed session cookies
+  app/services.py                    per-user scoring, alerts, related transactions
+  app/engine/                        patterns, unified risk, scanners, graph, simulator, CSV import, redaction
+  app/routes/                        transactions, intel, cases, alerts, network, simulator, AI, account
   app/schemas.py                     Pydantic request/response models and input validation
   app/fraud.py                       features, scoring, SHAP-based explanations
   app/predictor.py                   pure-Python tree inference + TreeSHAP (no lightgbm at runtime)
   app/received.py                    rule-based check for money received
   app/model/                         trees.json (served), fraud_model.txt (LightGBM), meta.json
-  tests/                             API, rules, predictor parity, Vercel entry point
+  tests/                             151 tests: API, engines, scanners, platform, AI, predictor parity
 
 frontend/
   vite.config.js                     dev server, proxies /api to the backend
-  src/App.jsx                        form state, samples, calls the API
+  src/main.jsx                       routes
+  src/pages/                         Home, Check, History, Investigate, Scan, Network, Simulator, Alerts,
+                                     Cases, Reports, Learn, Emergency, Settings, Privacy, Model
+  src/components/Layout.jsx, ui.jsx  app shell and shared UI (risk levels, rows, breakdown)
+  src/components/AiPanel.jsx, Graph.jsx, QrScanner.jsx
   src/components/UploadCard.jsx      screenshot drop / paste + in-browser OCR (Tesseract.js)
   src/components/TransactionForm.jsx transaction details form
   src/components/ResultCard.jsx      verdict, meter, reasons, advice
   src/components/ModelInfo.jsx       test-set metrics table
   src/lib/ocrParse.js                app, sent/received, amount, time, UTR, other party, UPI ID, status from OCR
   src/lib/ocrParse.test.js           parser tests (node --test)
-  src/lib/api.js                     fetch helpers
-  src/styles.css                     styles (light and dark)
+  src/lib/api.js, auth.jsx           fetch helpers, session context
+  src/styles.css, platform.css       styles (light and dark)
 ```
 
 Note: scikit-learn is not used. On this machine Windows Application Control blocks one of SciPy's DLLs, so the metrics are implemented in numpy in `train_model.py`.
