@@ -6,6 +6,8 @@ The model is LightGBM trained on **PaySim**, as recommended in [data-and-scope.m
 
 **Stack:** React 19 + Vite (`frontend/`) · FastAPI + LightGBM (`backend/`) · Tesseract.js for in-browser OCR
 
+Full technical details (architecture, data, model, API, OCR parser, design system, limitations) are in the **[Technical Reference Document](docs/TRD.md)**.
+
 ## Setup
 
 ### Prerequisites
@@ -73,6 +75,36 @@ cd ../backend && uvicorn app.main:app --port 8000
 ```
 
 FastAPI serves the built React app and the API together at http://127.0.0.1:8000.
+
+### Open it from your phone or another device (same Wi-Fi)
+
+**Development mode.** Start the backend as usual. Only the frontend needs to listen on the network, because Vite forwards `/api` to the backend on the same machine:
+
+```bash
+# terminal 1
+cd backend
+uvicorn app.main:app --reload --reload-dir app --port 8000
+
+# terminal 2
+cd frontend
+npm run dev:network               # same as: npm run dev -- --host
+```
+
+Vite prints a `Network:` address such as `http://192.168.1.20:5173`. Open that on the other device.
+
+**Single-server mode.** Build once, then let FastAPI listen on all network interfaces:
+
+```bash
+cd frontend && npm run build
+cd ../backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Open `http://<your-computer's-IP>:8000` on the other device. On Windows, `ipconfig` shows the IP under "IPv4 Address".
+
+If the other device can't connect:
+- Allow Python / Node.js through Windows Firewall for **private** networks (Windows asks the first time), and make sure the Wi-Fi is set to a private network.
+- Both devices must be on the same network. Some guest and campus Wi-Fi networks block devices from reaching each other.
+- Anyone on that network can open the app while it runs. Stop the servers (Ctrl+C) when you're done.
 
 ### Retrain the model (optional)
 
@@ -178,6 +210,7 @@ Read these numbers with care:
 
 ```
 data-and-scope.md                    dataset choice and project scope
+docs/TRD.md                          technical reference document
 train_model.py                       training, evaluation, saves the model
 requirements.txt                     training dependencies
 
