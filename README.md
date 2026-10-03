@@ -92,6 +92,7 @@ python train_model.py             # ~2 min; writes backend/app/model/fraud_model
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/predict` | Score a transaction. Body: `type` (`TRANSFER` / `CASH_OUT`), `amount`, `hour` (0-23), `sender_balance_before`, and optionally `sender_balance_after`, `receiver_balance_before`, `receiver_balance_after`. |
+| `POST` | `/api/check-received` | Rule-based check for money **received**. Body: `amount`, `hour`, and `knows_sender`, `in_bank`, `asked_to_pay`, each `yes` / `no` / `unsure`. Returns the same shape with `probability: null` and `method: "rules"`. |
 | `GET` | `/api/model-info` | Test-set metrics, thresholds and example transactions. |
 
 ```bash
@@ -107,13 +108,41 @@ A UPI screenshot shows the amount, date/time, transaction ID / UTR, payee name a
 
 | Step | What the user does | Maps to PaySim |
 |---|---|---|
-| 1. Upload screenshot (optional) | Drop, choose or paste (Ctrl+V) a GPay / PhonePe / Paytm / BHIM receipt. OCR runs **in the browser** with Tesseract.js, so the image never leaves the device. | `amount`; time → `step % 24` |
-| 2. Confirm details | Pick "Sent money" or "Cash withdrawal". Enter the sender's balance before the payment (from the bank SMS). The balance after is auto-calculated if left blank. | `type`, `oldbalanceOrg`, `newbalanceOrig` |
+| 1. Upload screenshot (optional) | Drop, choose or paste (Ctrl+V) a GPay / PhonePe / Paytm / BHIM receipt, sent or received. OCR runs **in the browser** with Tesseract.js, so the image never leaves the device. | `amount`; time → `step % 24` |
+| 2. Confirm details | Pick "Sent money", "Cash withdrawal" or "Received money". For sent money, enter the sender's balance before the payment (from the bank SMS). The balance after is auto-calculated if left blank. | `type`, `oldbalanceOrg`, `newbalanceOrig` |
 | 2b. Optional | Receiver's balance before and after (usually only a bank knows these) | `oldbalanceDest`, `newbalanceDest` |
 | 2c. Kept for reference | Transaction ID, payee, UPI ID, status from the screenshot. Shown in the result but **not scored**, since PaySim has no such fields. | none |
+| 2d. Received money | Three questions instead of balances: do you know the sender, does the money show in your bank, has anyone asked for money back or a fee. Scored with rules (see below). | none |
 | 3. Result | Risk level (low / medium / high), fraud score, reasons, and what to do (1930 helpline, cybercrime.gov.in) | |
 
-"Try a normal example" and "Try a suspicious example" fill the form with real test-set transactions.
+"Or try a normal / suspicious payment" fills the form with real test-set transactions.
+
+### Screenshot reading
+
+Tested on Google Pay, PhonePe, Paytm and BHIM receipts, both sent and received (light and dark themes). The parser ([ocrParse.js](frontend/src/lib/ocrParse.js)) finds:
+
+- **App**: from its name on the receipt.
+- **Direction**: "Money Received", "Received from", "Credited to" or a "From …" heading mean received. "Paid to", "To …", "Debited" or "Paid" mean sent.
+- **Amount**: the tallest amount-shaped word on the image, since the headline amount is the largest text on every receipt. OCR often drops it from the plain text or reads ₹ as `Z`, `I` or `%`. Paytm's "Rupees … Only" line is used as a cross-check.
+- **Other person**: the name after "From" or "Received from" when received, or after "To", "Paid to" or "Banking Name" when sent, plus the nearest UPI ID (masked IDs keep their visible part).
+- **Reference**: the 12-digit UTR / UPI ref is preferred over the app's own transaction ID, because that is the number banks and cybercrime.gov.in ask for.
+- **Date and time**: formats like `16 Jul 2026`, `13 Sept 2026`, `1st Oct 26` and `11:09 PM`.
+
+Tesseract runs in sparse-text mode (PSM 11), which keeps the big headline amount that the default page layout misses.
+
+### Received money
+
+The model only learned *outgoing* account-takeover fraud: PaySim has no labelled scams on incoming money. Received payments are therefore scored with transparent rules in [received.py](backend/app/received.py), built on the common incoming-money scams:
+
+| Signal | Risk |
+|---|---|
+| Money is not in the bank app or SMS (fake "payment received" screenshot) | high |
+| Asked to send it back, refund it, or pay a fee or deposit ("wrong transfer", task and job scams) | high |
+| Unknown sender and ₹50,000 or more (mule-account pattern) | high |
+| Unknown or unsure sender, or unsure whether it arrived | medium |
+| Known sender, money in the bank, nobody asking for anything | low |
+
+Receiving money can't take money out of your account by itself, so an unexpected credit is at least medium but only high with a stronger sign. It still matters, because stolen money passing through your account can get the account frozen.
 
 ## Modelling decisions
 
@@ -157,6 +186,7 @@ backend/
   app/main.py                        FastAPI app: POST /api/predict, GET /api/model-info, serves frontend/dist
   app/schemas.py                     Pydantic request/response models and input validation
   app/fraud.py                       model loading, features, SHAP-based explanations
+  app/received.py                    rule-based check for money received
   app/model/                         fraud_model.txt (LightGBM), meta.json (thresholds, metrics, samples)
 
 frontend/
@@ -166,7 +196,7 @@ frontend/
   src/components/TransactionForm.jsx transaction details form
   src/components/ResultCard.jsx      verdict, meter, reasons, advice
   src/components/ModelInfo.jsx       test-set metrics table
-  src/lib/ocrParse.js                extracts amount / time / UTR / payee / UPI ID / status from OCR text
+  src/lib/ocrParse.js                app, sent/received, amount, time, UTR, other party, UPI ID, status from OCR
   src/lib/api.js                     fetch helpers
   src/styles.css                     styles (light and dark)
 ```

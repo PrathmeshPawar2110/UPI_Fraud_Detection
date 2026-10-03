@@ -3,7 +3,7 @@ import UploadCard from "./components/UploadCard.jsx";
 import TransactionForm from "./components/TransactionForm.jsx";
 import ResultCard from "./components/ResultCard.jsx";
 import ModelInfo from "./components/ModelInfo.jsx";
-import { getModelInfo, predict } from "./lib/api.js";
+import { checkReceived, getModelInfo, predict } from "./lib/api.js";
 import { localDateTime } from "./lib/format.js";
 
 const EMPTY_FORM = {
@@ -18,6 +18,10 @@ const EMPTY_FORM = {
   payee: "",
   payeeUpi: "",
   status: "",
+  // received money only: "yes" | "no" | "unsure"
+  knowsSender: "",
+  inBank: "",
+  askedToPay: "",
 };
 
 const num = (v) => (String(v).trim() === "" ? null : Number(v));
@@ -59,6 +63,12 @@ export default function App() {
     const found = [], missing = [];
     const mark = (ok, label) => (ok ? found : missing).push(label);
 
+    const received = p.direction === "received";
+    if (p.direction) {
+      // a cash withdrawal the user already picked stays; otherwise follow the screenshot
+      updates.type = received ? "RECEIVED" : "TRANSFER";
+      found.push(received ? "Money received" : "Money sent");
+    }
     mark(put("amount", p.amount), "Amount");
     if (p.date || p.time) {
       const now = new Date();
@@ -69,37 +79,54 @@ export default function App() {
     mark(!!p.time, "Time");
     const refs = [put("txnId", p.txnId), put("payee", p.payee), put("payeeUpi", p.payeeUpi), put("status", p.status)];
     mark(refs[0], "Transaction ID");
-    mark(refs[1] || refs[2], "Payee");
+    mark(refs[1] || refs[2], received ? "Sender" : "Payee");
     if (refs.some(Boolean)) setRefOpen(true);
-    missing.push("Balance before");
+    missing.push(received ? "3 quick questions" : "Balance before");
 
-    setForm((f) => ({ ...f, ...updates }));
-    setFilled(new Set(Object.keys(updates)));
-    balBeforeRef.current?.focus();
+    setForm((f) => {
+      const keepCashOut = f.type === "CASH_OUT" && updates.type === "TRANSFER";
+      return { ...f, ...updates, ...(keepCashOut ? { type: "CASH_OUT" } : {}) };
+    });
+    setFilled(new Set(Object.keys(updates).filter((k) => k !== "type")));
+    if (!received) balBeforeRef.current?.focus();
     return { found, missing };
   }, []);
 
   async function check(values) {
     setError("");
+    const received = values.type === "RECEIVED";
     const amount = num(values.amount), balBefore = num(values.balBefore);
     if (!amount || amount <= 0) return setError("Please enter the amount.");
-    if (balBefore === null) return setError("Please enter the sender's balance before the payment.");
     if (!values.when) return setError("Please enter the date and time.");
+    const hour = new Date(values.when).getHours();
     const destBefore = num(values.destBefore), destAfter = num(values.destAfter);
-    if ((destBefore === null) !== (destAfter === null)) return setError("Enter both receiver balances, or leave both empty.");
+    if (received) {
+      if (!values.knowsSender || !values.inBank || !values.askedToPay) return setError("Please answer the three questions.");
+    } else {
+      if (balBefore === null) return setError("Please enter the sender's balance before the payment.");
+      if ((destBefore === null) !== (destAfter === null)) return setError("Enter both receiver balances, or leave both empty.");
+    }
 
     setBusy(true);
     try {
-      const r = await predict({
-        type: values.type,
-        amount,
-        hour: new Date(values.when).getHours(),
-        sender_balance_before: balBefore,
-        sender_balance_after: num(values.balAfter),
-        receiver_balance_before: destBefore,
-        receiver_balance_after: destAfter,
+      const r = received
+        ? await checkReceived({
+          amount, hour, knows_sender: values.knowsSender, in_bank: values.inBank, asked_to_pay: values.askedToPay,
+        })
+        : await predict({
+          type: values.type,
+          amount,
+          hour,
+          sender_balance_before: balBefore,
+          sender_balance_after: num(values.balAfter),
+          receiver_balance_before: destBefore,
+          receiver_balance_after: destAfter,
+        });
+      const checkedAt = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+      setResult({
+        ...r, checkedAt, received,
+        refs: { txnId: values.txnId, payee: values.payee, payeeUpi: values.payeeUpi, status: values.status },
       });
-      setResult({ ...r, refs: { txnId: values.txnId, payee: values.payee, payeeUpi: values.payeeUpi, status: values.status } });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -129,22 +156,24 @@ export default function App() {
 
   return (
     <div className="wrap">
-      <header>
-        <div className="logo">
-          <div className="logo-mark">₹</div>
-          <div>
-            <h1>UPI Fraud Check</h1>
-            <p>Upload a payment screenshot or enter the details to see how risky a transaction looks.</p>
-          </div>
+      <header className="masthead">
+        <div>
+          <p className="label">Payment risk check · UPI</p>
+          <h1>UPI Fraud <em>Check</em></h1>
+          <p className="lede">
+            Upload a payment screenshot or type the details. The model scores how closely the payment matches
+            account-takeover fraud, and says why.
+          </p>
         </div>
         <div className="samples">
-          <button className="ghost" type="button" onClick={() => loadSample("legit")}>Try a normal example</button>
-          <button className="ghost" type="button" onClick={() => loadSample("fraud")}>Try a suspicious example</button>
+          <span className="label">Or try</span>
+          <button className="textbtn" type="button" onClick={() => loadSample("legit")}>a normal payment <span>→</span></button>
+          <button className="textbtn" type="button" onClick={() => loadSample("fraud")}>a suspicious payment <span>→</span></button>
         </div>
       </header>
 
-      <div className="grid">
-        <div>
+      <div className="layout">
+        <main>
           <UploadCard onParsed={applyParsed} />
           <TransactionForm
             form={form}
@@ -159,17 +188,18 @@ export default function App() {
             error={error}
             balBeforeRef={balBeforeRef}
           />
-        </div>
-        <div>
+        </main>
+        <aside>
           <ResultCard result={result} />
-          <ModelInfo info={modelInfo} failed={modelInfoFailed} />
-        </div>
+        </aside>
       </div>
+
+      <ModelInfo info={modelInfo} failed={modelInfoFailed} />
 
       <footer>
         Educational project. The model is trained on PaySim, a synthetic mobile-money dataset, because no public dataset of
         real UPI fraud exists. It is not financial advice. If you think you were defrauded, call the National Cyber Crime
-        Helpline <b>1930</b> or report at cybercrime.gov.in.
+        Helpline <b>1930</b> or report at <b>cybercrime.gov.in</b>.
       </footer>
     </div>
   );

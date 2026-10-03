@@ -13,7 +13,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .fraud import META, score
-from .schemas import Prediction, Transaction
+from .received import check_received
+from .schemas import Prediction, ReceivedPayment, Transaction
 
 app = FastAPI(title="UPI Fraud Check API")
 
@@ -33,6 +34,9 @@ FIELD_LABELS = {
     "sender_balance_after": "Sender's balance after",
     "receiver_balance_before": "Receiver's balance before",
     "receiver_balance_after": "Receiver's balance after",
+    "knows_sender": "Do you know the sender",
+    "in_bank": "Does it show in your bank",
+    "asked_to_pay": "Asked to send money back or pay",
 }
 
 
@@ -58,6 +62,12 @@ def model_info():
 @app.post("/api/predict", response_model=Prediction)
 def predict(t: Transaction):
     return score(t)
+
+
+@app.post("/api/check-received", response_model=Prediction)
+def check_received_payment(p: ReceivedPayment):
+    """Money received into the user's account: rule-based, since the model only learned outgoing fraud."""
+    return check_received(p)
 
 
 # Serve the built React app (frontend/dist) when it exists, so one process can run everything.

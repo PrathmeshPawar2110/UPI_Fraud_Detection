@@ -7,9 +7,12 @@ async function request(path, options) {
 
 export const getModelInfo = () => request("/api/model-info");
 
-export const predict = (body) =>
-  request("/api/predict", {
+const post = (path) => (body) =>
+  request(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
+export const predict = post("/api/predict");
+export const checkReceived = post("/api/check-received");

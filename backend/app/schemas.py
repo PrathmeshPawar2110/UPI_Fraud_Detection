@@ -22,14 +22,27 @@ class Transaction(BaseModel):
         return self
 
 
+Answer = Literal["yes", "no", "unsure"]
+
+
+class ReceivedPayment(BaseModel):
+    """Money that came INTO the user's account. Scored with rules, not the model."""
+    amount: float = Field(gt=0, allow_inf_nan=False)
+    hour: int = Field(ge=0, le=23)
+    knows_sender: Answer        # do you know the sender and expect this money?
+    in_bank: Answer             # does the credit show in your bank app / bank SMS?
+    asked_to_pay: Answer        # asked to return it, refund it, or pay a fee / deposit?
+
+
 class Reason(BaseModel):
     text: str
     direction: Literal["up", "down"]
 
 
 class Prediction(BaseModel):
-    probability: float
+    probability: Optional[float]  # None for the rule-based received-money check
     risk: Literal["low", "medium", "high"]
     meter: float
     reasons: list[Reason]
     used_receiver_balances: bool
+    method: Literal["model", "rules"] = "model"
