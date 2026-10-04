@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import AiPanel from "../components/AiPanel.jsx";
-import { Breakdown, ErrorNote, Level, Loading, Reasons, Section, Stamp, Synthetic, TxRow } from "../components/ui.jsx";
+import Verdict from "../components/Verdict.jsx";
+import { Breakdown, ErrorNote, Level, Loading, Reasons, Section, Synthetic, TxRow } from "../components/ui.jsx";
 import * as api from "../lib/api.js";
 import { DIRECTION, inr, party, when } from "../lib/format.js";
 
-const REVIEW = [["legitimate", "I made this payment"], ["suspicious", "Suspicious"], ["confirmed_fraud", "Confirmed fraud"]];
+const REVIEW = [["legitimate", "This is fine"], ["suspicious", "Looks suspicious"], ["confirmed_fraud", "It was fraud"]];
 
 export default function Investigate() {
   const { id } = useParams();
@@ -15,6 +16,8 @@ export default function Investigate() {
   const [note, setNote] = useState("");
   const [cases, setCases] = useState([]);
   const [msg, setMsg] = useState("");
+  const [bal, setBal] = useState("");
+  const [balError, setBalError] = useState("");
 
   const load = useCallback(() => {
     setError(null);
@@ -33,6 +36,17 @@ export default function Investigate() {
   async function review(status) {
     const updated = await api.reviewTransaction(t.id, status);
     setData({ ...data, transaction: { ...t, review_status: updated.review_status } });
+  }
+  async function addBalance(e) {
+    e.preventDefault();
+    setBalError("");
+    try {
+      await api.updateTransaction(t.id, { balance_before: Number(bal) });
+      setBal("");
+      load();
+    } catch (err) {
+      setBalError(err.message);
+    }
   }
   async function addNote(e) {
     e.preventDefault();
@@ -59,37 +73,39 @@ export default function Investigate() {
 
   return (
     <div className="investigate">
-      <p className="crumbs"><Link to="/transactions">History</Link> / Transaction #{t.id}</p>
-      <header className="inv-head">
-        <div>
-          <p className="label">{DIRECTION[t.direction]} · {when(t.occurred_at)} {t.is_synthetic && <Synthetic small />}</p>
-          <h1 className="inv-amount">{inr(t.amount)}</h1>
-          <p className="inv-party">{t.direction === "received" ? "from" : "to"} <b>{party(t)}</b>
-            {t.counterparty_name && t.counterparty_upi && <> · {t.counterparty_name}</>}
-            {t.payment_app && <> · {t.payment_app}</>}{t.external_id && <> · Ref {t.external_id}</>}</p>
-        </div>
-        <div className="inv-score">
-          <Stamp level={t.risk_level} />
-          <p className="score-big" aria-label={`Risk score ${risk.points ?? "unknown"} out of 100`}>{risk.points ?? "–"}<small>/100</small></p>
-          <p className="note">Unified risk score</p>
-        </div>
+      <p className="crumbs"><Link to="/transactions">← My payments</Link></p>
+      <header className="inv-head simple">
+        <p className="label">{t.direction === "received" ? "Received" : t.direction === "cash_out" ? "Cash withdrawal" : "Paid"} · {when(t.occurred_at)} {t.is_synthetic && <Synthetic small />}</p>
+        <h1 className="inv-amount">{inr(t.amount)}</h1>
+        <p className="inv-party">{t.direction === "received" ? "from" : "to"} <b>{party(t)}</b>
+          {t.counterparty_name && t.counterparty_upi && <> · {t.counterparty_name}</>}
+          {t.payment_app && <> · {t.payment_app}</>}{t.external_id && <> · Ref {t.external_id}</>}</p>
       </header>
 
-      <div className="review-bar" role="group" aria-label="Review this transaction">
-        <span className="label">Your review</span>
+      <Verdict kind={t.direction === "received" ? "received" : "sent"} level={t.risk_level || "unknown"}
+               reasons={(risk.reasons || []).filter((r) => r.direction !== "down")} />
+
+      {comps.model && !comps.model.available && t.direction !== "received" && (
+        <form className="add-balance" onSubmit={addBalance}>
+          <label htmlFor="bal">For a full check, add your bank balance before this payment <span className="hint">(it's in your bank SMS)</span></label>
+          <div className="add-balance-row">
+            <div className="money"><input id="bal" type="number" inputMode="decimal" min="0" step="0.01" value={bal} onChange={(e) => setBal(e.target.value)} /></div>
+            <button type="submit" className="big-btn primary-btn" disabled={!bal}>Check again</button>
+          </div>
+          {balError && <p className="error-box" role="alert">{balError}</p>}
+        </form>
+      )}
+
+      <div className="review-bar" role="group" aria-label="Mark this payment">
+        <span className="verdict-sub">Mark this payment:</span>
         {REVIEW.map(([v, label]) => (
           <button key={v} type="button" className={"pill" + (t.review_status === v ? " on" : "")} aria-pressed={t.review_status === v}
                   onClick={() => review(t.review_status === v ? "unreviewed" : v)}>{label}</button>
         ))}
       </div>
 
-      {(t.risk_level === "high" || t.review_status === "confirmed_fraud") && (
-        <div className="callout high">
-          <strong>High-risk pattern detected.</strong> If you didn't make or expect this payment, act now:{" "}
-          <Link to="/emergency">emergency steps</Link> · call <b>1930</b> · tell your bank.
-        </div>
-      )}
-
+      <details className="more-details full-details">
+        <summary>Full details: score, evidence, timeline, notes</summary>
       <div className="inv-grid">
         <div>
           <Section no="01" title="Why this score">
@@ -168,7 +184,7 @@ export default function Investigate() {
             </dl>
             {cp.signals?.filter((s) => s.severity !== "info").map((s) => <p key={s.code} className="warn-note">{s.text}</p>)}
             <p className="panel-links">
-              {cp.vpa && <Link to={`/scan?tab=upi&vpa=${encodeURIComponent(cp.vpa)}`}>Check UPI ID</Link>}
+              {cp.vpa && <Link to={`/before-you-pay?tab=upi&vpa=${encodeURIComponent(cp.vpa)}`}>Check UPI ID</Link>}
               <Link to={`/network?focus=${encodeURIComponent("party:" + (t.counterparty_upi || t.counterparty_name || "").toLowerCase())}`}>View in network</Link>
               {cp.vpa && <Link to={`/reports?vpa=${encodeURIComponent(cp.vpa)}`}>Report this UPI ID</Link>}
             </p>
@@ -210,6 +226,7 @@ export default function Investigate() {
           <button type="button" className="textbtn danger" onClick={remove}>Delete this transaction</button>
         </aside>
       </div>
+      </details>
     </div>
   );
 }

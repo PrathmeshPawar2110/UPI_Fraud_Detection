@@ -49,6 +49,7 @@ export const listTransactions = (params) => get("/api/transactions", params);
 export const getTransaction = (id) => get(`/api/transactions/${id}`);
 export const reviewTransaction = (id, review_status) => patch(`/api/transactions/${id}`, { review_status });
 export const deleteTransaction = (id) => del(`/api/transactions/${id}`);
+export const updateTransaction = (id, body) => patch(`/api/transactions/${id}`, body);
 export const getInvestigation = (id) => get(`/api/investigations/${id}`);
 export const addTxNote = (id, text) => post(`/api/investigations/${id}/notes`, { text });
 

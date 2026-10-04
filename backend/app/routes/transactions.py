@@ -36,7 +36,10 @@ class ImportResult(BaseModel):
 
 
 class Review(BaseModel):
-    review_status: ReviewStatus
+    """Update a saved payment: mark it, and/or add the balances a receipt doesn't show (then it's re-scored)."""
+    review_status: Optional[ReviewStatus] = None
+    balance_before: Optional[float] = Field(default=None, ge=0, le=1e10, allow_inf_nan=False)
+    balance_after: Optional[float] = Field(default=None, ge=0, le=1e10, allow_inf_nan=False)
 
 
 class NoteIn(BaseModel):
@@ -189,8 +192,14 @@ def get_transaction(tx_id: int, user: User = Depends(current_user), db: Session 
 @router.patch("/transactions/{tx_id}", response_model=TransactionDetail)
 def review(tx_id: int, body: Review, user: User = Depends(current_user), db: Session = Depends(get_db)):
     tx = own_transaction(db, user, tx_id)
-    tx.review_status = body.review_status
-    audit(db, user.id, "transactions.review", transaction_id=tx.id, status=body.review_status)
+    if body.review_status is not None:
+        tx.review_status = body.review_status
+        audit(db, user.id, "transactions.review", transaction_id=tx.id, status=body.review_status)
+    fields = body.model_fields_set & {"balance_before", "balance_after"}
+    if fields:
+        for k in fields:
+            setattr(tx, k, getattr(body, k))
+        S.score(db, tx, S.history(db, user), explain=True)  # the model can now run
     db.commit()
     return tx
 

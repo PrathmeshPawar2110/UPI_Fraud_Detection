@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { PageHead } from "../components/ui.jsx";
 
-const SCAMS = [
+export const SCAMS = [
   { id: "upi", title: "UPI collect & 'receive' tricks", how: "You get a payment request or QR and are told to approve it or enter your PIN to receive money.",
     flags: ["'Enter PIN to receive'", "A collect request from someone you don't know", "A QR sent over chat to 'get a refund'"],
     act: "Decline. Receiving money never needs a PIN or a scan." },

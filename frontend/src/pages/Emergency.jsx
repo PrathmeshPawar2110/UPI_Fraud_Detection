@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { getGuidance } from "../lib/api.js";
 
 // Static fallback so this page works even if the API is down.
-const FALLBACK = {
+export const FALLBACK = {
   steps: [
     { title: "Stop further payments", text: "Don't approve any more requests or scan any QR. Block UPI in your bank app or by calling your bank." },
     { title: "Preserve the evidence", text: "Keep screenshots, the transaction ID / UTR, the scammer's UPI ID, number, messages and links." },

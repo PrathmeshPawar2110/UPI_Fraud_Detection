@@ -1,17 +1,19 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router";
 import Layout from "./components/Layout.jsx";
 import { AuthProvider, RequireAuth } from "./lib/auth.jsx";
 import Alerts from "./pages/Alerts.jsx";
 import { CaseDetail, CaseList, CaseReport } from "./pages/Cases.jsx";
 import Check from "./pages/Check.jsx";
-import Emergency from "./pages/Emergency.jsx";
+import CheckPayment from "./pages/CheckPayment.jsx";
+import Help from "./pages/Help.jsx";
 import Home from "./pages/Home.jsx";
 import { Model, NotFound, Privacy } from "./pages/Info.jsx";
 import Investigate from "./pages/Investigate.jsx";
 import Learn from "./pages/Learn.jsx";
 import Login from "./pages/Login.jsx";
+import More from "./pages/More.jsx";
 import Network from "./pages/Network.jsx";
 import Reports from "./pages/Reports.jsx";
 import Scan from "./pages/Scan.jsx";
@@ -23,6 +25,12 @@ import "./platform.css";
 
 const auth = (el) => <RequireAuth>{el}</RequireAuth>;
 
+// Old addresses keep working (and keep their ?query).
+function Moved({ to, tab }) {
+  const { search } = useLocation();
+  return <Navigate to={to + (tab ? `?tab=${tab}` : search)} replace />;
+}
+
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
@@ -30,16 +38,20 @@ createRoot(document.getElementById("root")).render(
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<Home />} />
-            <Route path="check" element={<Check />} />
+            <Route path="check" element={<CheckPayment />} />
+            <Route path="check/detailed" element={<Check />} />
+            <Route path="before-you-pay" element={<Scan />} />
+            <Route path="help" element={<Help />} />
+            <Route path="more" element={<More />} />
             <Route path="login" element={<Login />} />
-            <Route path="scan" element={<Scan />} />
-            <Route path="message-scanner" element={<Navigate to="/scan?tab=message" replace />} />
-            <Route path="url-checker" element={<Navigate to="/scan?tab=url" replace />} />
-            <Route path="qr-scanner" element={<Navigate to="/scan?tab=qr" replace />} />
-            <Route path="upi-check" element={<Navigate to="/scan?tab=upi" replace />} />
+            <Route path="scan" element={<Moved to="/before-you-pay" />} />
+            <Route path="message-scanner" element={<Moved to="/before-you-pay" tab="message" />} />
+            <Route path="url-checker" element={<Moved to="/before-you-pay" tab="url" />} />
+            <Route path="qr-scanner" element={<Moved to="/before-you-pay" tab="qr" />} />
+            <Route path="upi-check" element={<Moved to="/before-you-pay" tab="upi" />} />
+            <Route path="emergency" element={<Moved to="/help" />} />
             <Route path="simulator" element={<Simulator />} />
             <Route path="learn" element={<Learn />} />
-            <Route path="emergency" element={<Emergency />} />
             <Route path="privacy" element={<Privacy />} />
             <Route path="model" element={<Model />} />
             <Route path="transactions" element={auth(<Transactions />)} />

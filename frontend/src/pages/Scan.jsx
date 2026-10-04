@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import QrScanner from "../components/QrScanner.jsx";
-import { ErrorNote, PageHead, Stamp, Tabs, TxRow } from "../components/ui.jsx";
+import Verdict from "../components/Verdict.jsx";
+import { ErrorNote, TxRow } from "../components/ui.jsx";
 import * as api from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 import { inr, when } from "../lib/format.js";
@@ -15,24 +16,46 @@ const EXAMPLES = {
   upi: "kyc.refund.helpdesk@ybl",
 };
 
+const CHOICES = [
+  ["qr", "▦", "Scan a QR code", "Before you pay at a QR, or if someone sends you one."],
+  ["upi", "@", "Check a UPI ID", "Someone asks you to pay to a UPI ID or number."],
+  ["url", "↗", "Check a link", "A payment or \"KYC\" link you were sent."],
+  ["message", "✉", "Check a message", "An SMS or WhatsApp message that looks suspicious."],
+];
+
 export default function Scan() {
   const [params, setParams] = useSearchParams();
-  const tab = TABS.some(([t]) => t === params.get("tab")) ? params.get("tab") : "message";
-  const setTab = (t) => setParams({ tab: t }, { replace: true });
+  const tab = TABS.some(([t]) => t === params.get("tab")) ? params.get("tab") : null;
+  const setTab = (t) => setParams(t ? { tab: t } : {}, { replace: false });
+  const current = CHOICES.find(([id]) => id === tab);
 
   return (
-    <>
-      <PageHead kicker="Scam intelligence" title="Scan before you pay">
-        Check a suspicious message, payment link, QR code or UPI ID. Nothing you scan is stored, and links are never opened.
-      </PageHead>
-      <Tabs tabs={TABS} value={tab} onChange={setTab} label="What to scan" />
-      <div className="tab-panel" role="tabpanel">
-        {tab === "message" && <MessageScan />}
-        {tab === "url" && <UrlScan />}
-        {tab === "qr" && <QrScan />}
-        {tab === "upi" && <UpiScan initial={params.get("vpa") || ""} />}
-      </div>
-    </>
+    <div className="guided">
+      {!tab ? (
+        <>
+          <h1 className="guided-title">Check before you pay</h1>
+          <p className="lede">What do you want to check? Nothing you check is saved, and links are never opened.</p>
+          <div className="choice-grid four">
+            {CHOICES.map(([id, icon, title, text]) => (
+              <button key={id} type="button" className="choice" onClick={() => setTab(id)}>
+                <span className="choice-icon" aria-hidden="true">{icon}</span>
+                <span className="choice-title">{title}</span>
+                <span className="choice-text">{text}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <button type="button" className="textbtn" onClick={() => setTab(null)}>← Check something else</button>
+          <h1 className="guided-title">{current[2]}</h1>
+          {tab === "message" && <MessageScan />}
+          {tab === "url" && <UrlScan />}
+          {tab === "qr" && <QrScan />}
+          {tab === "upi" && <UpiScan initial={params.get("vpa") || ""} />}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -60,7 +83,7 @@ function MessageScan() {
                     placeholder="English, Hinglish or Hindi" />
         </div>
         <div className="row-actions">
-          <button type="submit" className="primary small" disabled={busy || !text.trim()}>{busy ? "Scanning…" : "Scan message"}</button>
+          <button type="submit" className="big-btn primary-btn" disabled={busy || !text.trim()}>{busy ? "Scanning…" : "Scan message"}</button>
           <button type="button" className="textbtn" onClick={() => setText(EXAMPLES.message)}>Use an example</button>
         </div>
         <p className="note">Tip: a screenshot of a message can be read with the <Link to="/check">screenshot reader</Link>; paste its text here.</p>
@@ -102,7 +125,7 @@ function UrlScan() {
           <input id="url" type="text" inputMode="url" maxLength={2000} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
         </div>
         <div className="row-actions">
-          <button type="submit" className="primary small" disabled={busy || !url.trim()}>{busy ? "Checking…" : "Check link"}</button>
+          <button type="submit" className="big-btn primary-btn" disabled={busy || !url.trim()}>{busy ? "Checking…" : "Check link"}</button>
           <button type="button" className="textbtn" onClick={() => setUrl(EXAMPLES.url)}>Use an example</button>
         </div>
         <p className="note">We only look at the address. We don't open the page, so redirects and page content aren't checked.</p>
@@ -136,7 +159,7 @@ function QrScan() {
             <input id="qrtext" type="text" maxLength={2000} value={payload} onChange={(e) => setPayload(e.target.value)} placeholder="upi://pay?pa=…" />
           </div>
           <div className="row-actions">
-            <button type="submit" className="primary small" disabled={busy || !payload.trim()}>Check</button>
+            <button type="submit" className="big-btn primary-btn" disabled={busy || !payload.trim()}>Check</button>
             <button type="button" className="textbtn" onClick={() => analyze(EXAMPLES.qr)}>Use an example</button>
           </div>
         </form>
@@ -177,7 +200,7 @@ function UpiScan({ initial }) {
           <input id="vpa" type="text" maxLength={300} value={vpa} onChange={(e) => setVpa(e.target.value)} placeholder="name@bank" autoCapitalize="none" />
         </div>
         <div className="row-actions">
-          <button type="submit" className="primary small" disabled={busy || !vpa.trim()}>Check UPI ID</button>
+          <button type="submit" className="big-btn primary-btn" disabled={busy || !vpa.trim()}>Check UPI ID</button>
           <button type="button" className="textbtn" onClick={() => setVpa(EXAMPLES.upi)}>Use an example</button>
         </div>
       </form>
@@ -196,7 +219,7 @@ function UpiScan({ initial }) {
                   <ul className="tx-list">{result.history.recent.map((t) => <TxRow key={t.id} t={{ ...t, counterparty_upi: result.vpa, review_status: "unreviewed" }} compact />)}</ul>
                 </>
               ) : <p className="muted">You haven't transacted with this UPI ID.</p>
-            ) : <p className="note"><Link to="/login?next=/scan?tab=upi">Sign in</Link> to compare with your own history.</p>}
+            ) : <p className="note"><Link to="/login?next=/before-you-pay?tab=upi">Sign in</Link> to compare with your own history.</p>}
             {result.valid && user && <Link to={`/reports?vpa=${encodeURIComponent(result.vpa)}`}>Report this UPI ID →</Link>}
           </ResultBox>
         )}
@@ -206,13 +229,14 @@ function UpiScan({ initial }) {
 }
 
 function ResultBox({ level, title, summary, children }) {
+  // Plain verdict first; the specific warnings stay visible underneath.
   return (
-    <div className={"result-box " + (level || "unknown")} aria-live="polite">
-      <Stamp level={level}>{level === "unknown" ? "Unknown" : undefined}</Stamp>
-      <h3>{title}</h3>
-      <p>{summary}</p>
-      {children}
-      <p className="note">Results are risk indicators, not proof. <Link to="/emergency">What to do if you've been scammed →</Link></p>
-    </div>
+    <Verdict kind="check" level={level || "unknown"}>
+      <div className="verdict-details">
+        <p className="verdict-sub">{title}</p>
+        <p className="small-print">{summary}</p>
+        {children}
+      </div>
+    </Verdict>
   );
 }

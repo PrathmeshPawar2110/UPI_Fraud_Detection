@@ -205,7 +205,7 @@ export default function Check() {
           <h1>Check a <em>payment</em></h1>
           <p className="lede">
             Upload a payment screenshot or type the details. The model scores how closely the payment matches
-            account-takeover fraud, and says why. <Link to="/scan">Scan a message, link, QR or UPI ID →</Link>
+            account-takeover fraud, and says why. <Link to="/before-you-pay">Scan a message, link, QR or UPI ID →</Link>
           </p>
         </div>
         <div className="samples">

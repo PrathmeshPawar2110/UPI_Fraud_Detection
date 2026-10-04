@@ -314,11 +314,11 @@ UPI_Fraud_Detection/
         ├── main.jsx              routes (react-router), auth provider
         ├── styles.css            design tokens, light/dark themes, checker styles
         ├── platform.css          styles for the platform pages (§27)
-        ├── pages/                Home, Check, Login, Transactions, Investigate, Scan, Network,
-        │                         Simulator, Alerts, Cases (+ report), Reports, Learn, Emergency,
+        ├── pages/                Home, CheckPayment (wizard), Check (detailed), Login, Transactions, Investigate, Scan, Network,
+        │                         Simulator, Alerts, Cases (+ report), Reports, Learn, Help, More,
         │                         Settings, Info (privacy, model, 404)
         ├── components/
-        │   ├── Layout.jsx        top bar, navigation, alert badge, footer
+        │   ├── Layout.jsx        top bar / phone bottom tabs, alert bell, account menu, footer
         │   ├── ui.jsx            Level, Stamp, Synthetic, TxRow, Breakdown, Reasons, Tabs, …
         │   ├── AiPanel.jsx       AI investigator panel with citation links
         │   ├── Graph.jsx         force-layout SVG graph with pan / zoom / select
@@ -868,7 +868,7 @@ The workflow cancels in-progress runs for the same branch and has read-only repo
 ### 14.1 Automated tests (run in CI on every push and pull request)
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 172 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 173 tests
 cd frontend && npm test                                                  # 11 tests
 ```
 
@@ -934,7 +934,7 @@ cd frontend && npm test                                                  # 11 te
 | Add a model feature | `FEATURES` and `build_features` in `train_model.py`, `build_row` (and `GROUPS` / `explain` wording) in `fraud.py`, `feature_row` in `tests/test_predictor.py`; retrain and commit the three model files |
 | Add a Python dependency to the API | Root `requirements.txt` (deployed) and `backend/requirements.txt` (local); keep it small, and the CI runtime check will catch a missing one |
 | Change risk bands | Threshold logic in `train_model.py` (retrain) or `thresholds` in `meta.json` |
-| Add a received-money rule | `check_received` in `received.py`, the question in `TransactionForm.jsx` `QUESTIONS`, the form field in `pages/Check.jsx` `EMPTY_FORM`, and the schema in `ReceivedPayment` |
+| Add a received-money rule | `check_received` in `received.py`, the question in `TransactionForm.jsx` `QUESTIONS` and the simple wizard `pages/CheckPayment.jsx`, the form field in `pages/Check.jsx` `EMPTY_FORM`, and the schema in `ReceivedPayment` |
 | New API endpoint | A router module in `app/routes/` (scope every query to `current_user`), include it in `main.py`, add a helper in `frontend/src/lib/api.js`, and add an access-control test |
 | Add a history pattern | A detector in `engine/patterns.py` returning a `Pattern` with evidence and a weight; tests in `test_engine.py`; add its code to `ALERT_PATTERNS` in `services.py` if it should alert |
 | Add a scam-message indicator | A tuple in `INDICATORS` in `engine/message.py` and a case in `test_scanners.py` |
@@ -1116,22 +1116,30 @@ It checks the format (`[a-z0-9][a-z0-9._-]{1,255}@[a-z][a-z0-9]{1,63}`) and maps
 
 React Router with an auth context (`/api/auth/me` on load). Pages that need an account redirect to `/login?next=…`; the `next` value is only accepted as a same-site path.
 
+The interface is built for field merchants who aren't technical: one task per screen, big buttons (at least 48 px tall), plain-language results, and every advanced tool still available but out of the way.
+
+**Navigation.** Five items only: **Home · Check payment · Before you pay · My payments · Help**. On desktop they sit in the top bar; below 760 px they become a fixed bottom tab bar with icons and labels. The top bar also has an alerts bell with an unread count and an account menu (Settings, More tools, Sign out). Investigator features (cases, alerts, connections map, simulator, quiz, reports, model page) are listed under **More tools** (`/more`).
+
+**Plain verdicts** (`components/Verdict.jsx`). Every result opens with a card that has an icon, a headline and one sentence saying what to do. Received money: *Looks OK / Be careful / Do not trust this payment*. Sent money: *Looks OK / Be careful / Likely fraud*. Pre-payment checks: *Looks OK / Be careful / Do not pay / Can't tell*. Up to four reasons follow, and a high result adds *Call 1930* and *What should I do?* buttons. The 0–100 score, model evidence and breakdown are inside a collapsed "Full details" section.
+
 | Route | Page | Account |
 |---|---|---|
-| `/` | Landing: hero, how it works, what you can check, explanations, Privacy First, demo, emergency | No |
-| `/check` | The original checker (screenshot OCR, form, result slip, model info) plus "Save & investigate". Several screenshots (≤ 20, chosen, dropped or pasted together) are read one after another with one OCR engine (`lib/ocr.js`); each result can be loaded into the form, and signed-in users can save all at once (`BatchScan.jsx`, mapping in `lib/scanBatch.js`) | No (saving needs one) |
-| `/scan?tab=message\|url\|qr\|upi` | Scanners; the spec's `/message-scanner`, `/url-checker`, `/qr-scanner` and `/upi-check` redirect here | No |
-| `/simulator` | Scenario list and animated timeline (instant with reduced motion) | No |
-| `/learn`, `/emergency`, `/privacy`, `/model` | Scam cards and quiz; emergency steps and 1930 button; privacy notes; model monitoring | No |
-| `/transactions` | History: search, filters, CSV import, demo data | Yes |
-| `/investigate/:id` | Score and breakdown, model / rule / pattern evidence, baseline, timeline, related, counterparty, review, case, AI panel, notes | Yes |
+| `/` | Home: three task cards (a customer paid me / check before you pay / lost money), unread alerts, three anti-scam rules | No |
+| `/check` | Three-step wizard: who paid → details (optional screenshot read on the device, amount, time; for received money three Yes / No / Not sure questions, starting with "Has the money reached YOUR bank account?"; for sent money, balance before) → plain verdict, advice, save to My payments. Several screenshots go to `BatchScan.jsx` | No (saving needs one) |
+| `/check/detailed` | The original full checker (all fields, result slip, model info) | No |
+| `/before-you-pay?tab=qr\|upi\|url\|message` | Four big tiles, then one scanner at a time with a plain verdict. `/scan`, `/message-scanner`, `/url-checker`, `/qr-scanner` and `/upi-check` redirect here | No |
+| `/help` | Call 1930, emergency steps, cybercrime.gov.in and Chakshu links, scam explainers ordered for merchants (fake screenshots first). `/emergency` redirects here | No |
+| `/more` | List of advanced tools | No (most tools need one) |
+| `/simulator`, `/learn`, `/privacy`, `/model` | Scenario simulator; scam quiz; privacy notes; model monitoring | No |
+| `/transactions` | My payments: search, a "Show" filter (all / dangerous / be careful / OK), more filters folded away; CSV import and practice data under "More options" (`?import=1` opens it) | Yes |
+| `/investigate/:id` | Amount and party, plain verdict, a box to add the missing balance (re-scores with the model through `PATCH /api/transactions/{id}`), "Mark this payment" buttons. Score breakdown, evidence, timeline, related payments, counterparty, case, AI panel and notes are under "Full details" | Yes |
 | `/network` | Graph, filters, flagged list, focus mode | Yes |
 | `/alerts` | Alerts and live demo stream with notifications | Yes |
 | `/cases`, `/cases/:id`, `/cases/:id/report` | Case list, case workspace (status, evidence, notes, AI), printable incident report | Yes |
 | `/reports` | Report a UPI ID, number or link; manage your reports | Yes |
 | `/settings` | Name, AI consent, notifications, retention, export, delete history, simulated Account Aggregator, delete account | Yes |
 
-**UX rules:** risk is always text + glyph + colour (● low, ▲ medium, ■ high, ◆ unknown); synthetic data always carries a "Synthetic" tag; loading, empty and error states on every data view; a skip link, labelled controls, `aria-live` results, `aria-pressed` toggles and keyboard-reachable graph nodes; a menu button below 980 px and no horizontal scroll at 390 px. Copy says "high-risk pattern" and "potentially suspicious", never that a person is a fraudster.
+**UX rules:** a result is never shown by colour alone: it always has an icon and words (verdict cards ✓ ! ✕ ?; list labels OK / Be careful / Danger, with the score in a tooltip). Synthetic data always carries a "Synthetic" tag. Every data view has loading, empty and error states. There is a skip link, labelled controls, `aria-live` results, `aria-pressed` toggles and keyboard-reachable graph nodes. The base font is 16 px and there is no horizontal scroll at 390 px. Copy says "high-risk pattern" and "potentially suspicious", never that a person is a fraudster.
 
 ## 28. API reference
 

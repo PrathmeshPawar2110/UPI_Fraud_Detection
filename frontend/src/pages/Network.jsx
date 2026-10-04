@@ -74,7 +74,7 @@ export default function Network() {
                 {partyKey(selected) && (
                   <p className="panel-links">
                     <Link to={`/transactions?q=${encodeURIComponent(partyKey(selected))}`}>Transactions</Link>
-                    {selected.kind === "upi" && <Link to={`/scan?tab=upi&vpa=${encodeURIComponent(partyKey(selected))}`}>Check UPI ID</Link>}
+                    {selected.kind === "upi" && <Link to={`/before-you-pay?tab=upi&vpa=${encodeURIComponent(partyKey(selected))}`}>Check UPI ID</Link>}
                     <button type="button" className="textbtn" onClick={() => setParams({ focus: selected.id })}>Focus here</button>
                   </p>
                 )}

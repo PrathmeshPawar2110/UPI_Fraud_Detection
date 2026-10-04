@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { DIRECTION, inr, party, when } from "../lib/format.js";
 
 const GLYPH = { low: "●", medium: "▲", high: "■", unknown: "◆" };
+export const PLAIN_LEVEL = { low: "OK", medium: "Be careful", high: "Danger" };
 const LABEL = { low: "Low risk", medium: "Medium risk", high: "High risk", unknown: "Unknown" };
 
 /** Risk level as text + glyph + colour (never colour alone). */
@@ -75,7 +76,9 @@ export function TxRow({ t, compact }) {
         </span>
         <span className="tx-when">{when(t.occurred_at)}</span>
         <span className="tx-risk">
-          <Level level={t.risk_level}>{t.risk_score != null ? `${Math.round(t.risk_score * 100)}` : "–"}</Level>
+          <span title={t.risk_score != null ? `Risk score ${Math.round(t.risk_score * 100)} / 100` : undefined}>
+            <Level level={t.risk_level}>{PLAIN_LEVEL[t.risk_level] || "Not checked"}</Level>
+          </span>
           {t.is_synthetic && <Synthetic small />}
           {t.review_status !== "unreviewed" && <span className="review-chip">{t.review_status.replace("_", " ")}</span>}
         </span>

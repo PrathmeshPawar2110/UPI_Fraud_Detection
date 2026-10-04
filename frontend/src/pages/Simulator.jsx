@@ -84,7 +84,7 @@ export default function Simulator() {
                     <Stamp level={run.final_level} />
                     <h3>Detected</h3>
                     <ul className="checklist">{run.detected.map((d) => <li key={d.code}><span aria-hidden="true">✓</span> {d.label}</li>)}</ul>
-                    <p className="note">What to do in a real case: <Link to="/emergency">emergency steps</Link> · <Link to="/learn">learn about this scam</Link></p>
+                    <p className="note">What to do in a real case: <Link to="/help">emergency steps</Link> · <Link to="/learn">learn about this scam</Link></p>
                   </div>
                 )}
                 {!done && <button type="button" className="textbtn" onClick={() => { clearInterval(timer.current); setShown(run.events.length); }}>Show all steps</button>}

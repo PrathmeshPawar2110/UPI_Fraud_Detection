@@ -375,3 +375,15 @@ def test_batch_validation_and_auth(user):
     assert user.post("/api/transactions/batch", json={"items": [tx()] * 51}).status_code == 400
     assert user.post("/api/transactions/batch", json={"items": [tx(amount=-1)]}).status_code == 400
     assert TestClient(app).post("/api/transactions/batch", json={"items": [tx()]}).status_code == 401  # signed out
+
+
+def test_adding_balance_rescores_with_the_model(user):
+    t = user.post("/api/transactions", json=tx(amount=181000, balance_before=None,
+                                               occurred_at=NOW.replace(hour=3).isoformat())).json()
+    assert t["risk"]["components"]["model"]["available"] is False
+    r = user.patch(f"/api/transactions/{t['id']}", json={"balance_before": 181000})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["balance_before"] == 181000 and body["review_status"] == "unreviewed"
+    assert body["risk"]["components"]["model"]["available"] and body["risk_level"] == "high"
+    assert user.patch(f"/api/transactions/{t['id']}", json={"balance_before": -5}).status_code == 400

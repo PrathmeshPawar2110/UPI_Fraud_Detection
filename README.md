@@ -19,6 +19,8 @@ The model is LightGBM trained on **PaySim**, as recommended in [data-and-scope.m
 
 **Stack:** React 19 + Vite + React Router (`frontend/`) · FastAPI + SQLAlchemy (Postgres / SQLite) + LightGBM-exported model (`backend/`) · Tesseract.js and jsQR in the browser · optional LLM (Anthropic / OpenAI / Azure OpenAI / Gemini) · Vercel + GitHub Actions
 
+**Made for merchants.** The app has five sections: **Home · Check payment · Before you pay · My payments · Help**. On a phone they appear as a bottom tab bar. Each check is a short series of steps and ends with a plain answer (*Looks OK*, *Be careful* or *Do not trust this payment*) and what to do next. Scores and evidence are folded under "Full details". Investigator tools (cases, alerts, connections map, simulator, quiz) are under **More tools**.
+
 Full technical details (architecture, data model, engines, API, security, limitations) are in the **[Technical Reference Document](docs/TRD.md)**.
 
 ## Setup
@@ -178,7 +180,7 @@ Commit all three files in `backend/app/model/`. The API serves `trees.json`, and
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 172 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 173 tests
 cd frontend && npm test                                                  # 11 tests: OCR parser, batch mapping
 ```
 
@@ -353,13 +355,13 @@ backend/
   app/predictor.py                   pure-Python tree inference + TreeSHAP (no lightgbm at runtime)
   app/received.py                    rule-based check for money received
   app/model/                         trees.json (served), fraud_model.txt (LightGBM), meta.json
-  tests/                             164 tests: API, engines, scanners, platform, AI, predictor parity
+  tests/                             173 tests: API, engines, scanners, platform, AI, predictor parity
 
 frontend/
   vite.config.js                     dev server, proxies /api to the backend
   src/main.jsx                       routes
-  src/pages/                         Home, Check, History, Investigate, Scan, Network, Simulator, Alerts,
-                                     Cases, Reports, Learn, Emergency, Settings, Privacy, Model
+  src/pages/                         Home, CheckPayment, Check, History, Investigate, Scan, Network, Simulator, Alerts,
+                                     Cases, Reports, Learn, Help, More, Settings, Privacy, Model
   src/components/Layout.jsx, ui.jsx  app shell and shared UI (risk levels, rows, breakdown)
   src/components/AiPanel.jsx, Graph.jsx, QrScanner.jsx
   src/components/UploadCard.jsx      screenshot drop / paste + in-browser OCR (Tesseract.js)

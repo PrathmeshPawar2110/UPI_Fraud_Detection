@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { ErrorNote, Empty, Loading, PageHead, Synthetic, TxRow } from "../components/ui.jsx";
+import { ErrorNote, Empty, Loading, Synthetic, TxRow } from "../components/ui.jsx";
 import { importCsv, listTransactions, loadDemo, removeDemo } from "../lib/api.js";
 
 const FILTERS = { q: "", risk: "", direction: "", app: "", review: "", min_amount: "", max_amount: "",
@@ -16,7 +16,7 @@ export default function Transactions() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [limit, setLimit] = useState(PAGE);
-  const [showImport, setShowImport] = useState(params.get("import") === "1");
+  const showImport = params.get("import") === "1";
   const [notice, setNotice] = useState("");
 
   const load = useCallback(() => {
@@ -59,34 +59,30 @@ export default function Transactions() {
 
   return (
     <>
-      <PageHead kicker="History" title="Your transactions"
-        actions={<>
-          <button type="button" className="ghost" onClick={() => setShowImport(!showImport)} aria-expanded={showImport}>Import CSV</button>
-          <Link className="button ghost-link" to="/check">Add a payment</Link>
-        </>}>
-        Every payment is scored against the ones before it. Open one to see why and investigate.
-      </PageHead>
-
-      {showImport && <ImportPanel onDone={(msg) => { setNotice(msg); load(); window.dispatchEvent(new Event("upig:alerts")); }} />}
+      <div className="list-head">
+        <h1 className="guided-title">My payments</h1>
+        <Link className="big-btn primary-btn" to="/check">+ Check a payment</Link>
+      </div>
+      <p className="lede">Payments you've checked and saved. Tap one to see if it's safe and what to do.</p>
       {notice && <p className="notice" role="status">{notice}</p>}
       <ErrorNote error={error} />
 
       <form className="filters" onSubmit={(e) => e.preventDefault()} role="search">
         <div className="field grow">
           <label htmlFor="q">Search</label>
-          <input id="q" type="text" placeholder="Name, UPI ID, reference or note" value={filters.q} onChange={set("q")} />
+          <input id="q" type="text" placeholder="Name, UPI ID or reference" value={filters.q} onChange={set("q")} />
         </div>
-        <Select id="risk" label="Risk" value={filters.risk} onChange={set("risk")}
-                options={[["", "Any"], ["high", "High"], ["medium", "Medium"], ["low", "Low"]]} />
-        <Select id="direction" label="Direction" value={filters.direction} onChange={set("direction")}
-                options={[["", "Any"], ["sent", "Sent"], ["received", "Received"], ["cash_out", "Cash withdrawal"]]} />
-        <Select id="review" label="Status" value={filters.review} onChange={set("review")}
-                options={[["", "Any"], ["unreviewed", "Not reviewed"], ["legitimate", "Legitimate"], ["suspicious", "Suspicious"], ["confirmed_fraud", "Confirmed fraud"]]} />
-        <Select id="sort" label="Sort" value={filters.sort} onChange={set("sort")}
-                options={[["newest", "Newest"], ["oldest", "Oldest"], ["risk", "Highest risk"], ["amount", "Largest amount"]]} />
+        <Select id="risk" label="Show" value={filters.risk} onChange={set("risk")}
+                options={[["", "All payments"], ["high", "Only dangerous"], ["medium", "Only 'be careful'"], ["low", "Only OK"]]} />
         <details className="more-filters">
           <summary>More filters</summary>
           <div className="filters-more">
+            <Select id="direction" label="Money" value={filters.direction} onChange={set("direction")}
+                    options={[["", "In and out"], ["received", "Received"], ["sent", "Sent"], ["cash_out", "Cash withdrawal"]]} />
+            <Select id="review" label="Marked as" value={filters.review} onChange={set("review")}
+                    options={[["", "Anything"], ["unreviewed", "Not marked"], ["legitimate", "OK"], ["suspicious", "Suspicious"], ["confirmed_fraud", "Fraud"]]} />
+            <Select id="sort" label="Order" value={filters.sort} onChange={set("sort")}
+                    options={[["newest", "Newest first"], ["oldest", "Oldest first"], ["risk", "Most dangerous first"], ["amount", "Largest first"]]} />
             <div className="field"><label htmlFor="min">Min ₹</label><input id="min" type="number" min="0" value={filters.min_amount} onChange={set("min_amount")} /></div>
             <div className="field"><label htmlFor="max">Max ₹</label><input id="max" type="number" min="0" value={filters.max_amount} onChange={set("max_amount")} /></div>
             <div className="field"><label htmlFor="from">From</label><input id="from" type="date" value={filters.date_from} onChange={set("date_from")} /></div>
@@ -101,18 +97,16 @@ export default function Transactions() {
 
       {!data ? <Loading /> : data.total === 0 ? (
         active ? <Empty title="No transactions match these filters." /> : (
-          <Empty title="No transactions yet."
+          <Empty title="No saved payments yet."
                  action={<div className="empty-actions">
-                   <Link className="button primary-link" to="/check">Check a payment</Link>
-                   <button type="button" className="ghost" onClick={() => setShowImport(true)}>Import a CSV</button>
-                   <button type="button" className="ghost" onClick={() => demo("load")}>Load demo data</button>
+                   <Link className="big-btn primary-btn" to="/check">Check a payment</Link>
                  </div>}>
-            Check a payment and save it, import a statement as CSV, or load synthetic demo data to explore.
+            Check a payment and tap "Save to My payments". It will appear here.
           </Empty>
         )
       ) : (
         <>
-          <p className="label count">{data.total} transaction{data.total === 1 ? "" : "s"}</p>
+          <p className="label count">{data.total} payment{data.total === 1 ? "" : "s"}</p>
           <ul className="tx-list">{data.items.map((t) => <TxRow key={t.id} t={t} />)}</ul>
           {data.items.length < data.total && (
             <button type="button" className="ghost center" onClick={() => setLimit(limit + PAGE)}>Show more</button>
@@ -120,14 +114,17 @@ export default function Transactions() {
         </>
       )}
 
-      <section className="demo-box">
-        <p><Synthetic /> Demo dataset: about 90 days of everyday payments with an investment scam, a fake refund and a
-          night-time account takeover embedded. Synthetic, not real bank data.</p>
-        <div className="empty-actions">
-          <button type="button" className="ghost" onClick={() => demo("load")}>Load demo data</button>
-          <button type="button" className="textbtn" onClick={() => demo("remove")}>Remove all synthetic data</button>
-        </div>
-      </section>
+      <details className="more-details list-more" open={showImport}>
+        <summary>More options</summary>
+        <ImportPanel onDone={(msg) => { setNotice(msg); load(); window.dispatchEvent(new Event("upig:alerts")); }} />
+        <section className="demo-box">
+          <p><Synthetic /> Practice data: about 90 days of everyday payments with a few scams mixed in. Not real bank data.</p>
+          <div className="empty-actions">
+            <button type="button" className="ghost" onClick={() => demo("load")}>Add practice data</button>
+            <button type="button" className="textbtn" onClick={() => demo("remove")}>Remove practice data</button>
+          </div>
+        </section>
+      </details>
     </>
   );
 }
