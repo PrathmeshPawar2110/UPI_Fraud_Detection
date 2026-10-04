@@ -868,8 +868,8 @@ The workflow cancels in-progress runs for the same branch and has read-only repo
 ### 14.1 Automated tests (run in CI on every push and pull request)
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 164 tests
-cd frontend && npm test                                                  # 8 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 172 tests
+cd frontend && npm test                                                  # 11 tests
 ```
 
 | File | Tests | What they prove |
@@ -1036,6 +1036,7 @@ The engine never lowers risk because of history: repeated legitimate payments on
 - **CSV import** (`POST /api/transactions/import`, body `{csv}`, ≤ 900 KB, ≤ 2,000 rows): column names are matched loosely (`date` / `timestamp` / `txn date`, `type` / `dr/cr`, `amount (inr)`, `upi id` / `vpa`, `utr` / `reference`, `closing balance`, …); directions accept sent / received / cash_out and debit / credit / DR / CR; there are 17 date formats (ISO, DD/MM/YYYY, "03 Oct 2026, 12:48 AM", …). Bad rows are skipped and reported with line numbers; good rows are imported and the whole history is rescored.
 - **Review** (`PATCH /api/transactions/{id}`): unreviewed, legitimate, suspicious or confirmed_fraud. Only the user can mark something as confirmed fraud.
 - **Investigation** (`GET /api/investigations/{id}`): the transaction with its full risk breakdown (SHAP computed on first view), a 24-hour timeline either side, same-counterparty and same-hour transactions, the counterparty profile (UPI ID check, totals, first seen, community reports), notes and linked cases. Notes: `POST /api/investigations/{id}/notes` (secrets masked).
+- **Batch save** (`POST /api/transactions/batch`, ≤ 50 items): used by the multi-screenshot scan. Items whose reference (UTR) is already in the user's history, or repeated within the batch, are skipped and reported; the rest are scored before a single batched insert and alerted like single saves.
 - **Retention:** if the user set a retention period, older transactions are deleted when settings change and whenever the history is listed.
 
 ## 22. Scam intelligence
@@ -1118,7 +1119,7 @@ React Router with an auth context (`/api/auth/me` on load). Pages that need an a
 | Route | Page | Account |
 |---|---|---|
 | `/` | Landing: hero, how it works, what you can check, explanations, Privacy First, demo, emergency | No |
-| `/check` | The original checker (screenshot OCR, form, result slip, model info) plus "Save & investigate" | No (saving needs one) |
+| `/check` | The original checker (screenshot OCR, form, result slip, model info) plus "Save & investigate". Several screenshots (≤ 20, chosen, dropped or pasted together) are read one after another with one OCR engine (`lib/ocr.js`); each result can be loaded into the form, and signed-in users can save all at once (`BatchScan.jsx`, mapping in `lib/scanBatch.js`) | No (saving needs one) |
 | `/scan?tab=message\|url\|qr\|upi` | Scanners; the spec's `/message-scanner`, `/url-checker`, `/qr-scanner` and `/upi-check` redirect here | No |
 | `/simulator` | Scenario list and animated timeline (instant with reduced motion) | No |
 | `/learn`, `/emergency`, `/privacy`, `/model` | Scam cards and quiz; emergency steps and 1930 button; privacy notes; model monitoring | No |
@@ -1142,6 +1143,7 @@ All bodies and responses are JSON; validation errors are HTTP 400 `{"detail": "�
 | POST | `/api/auth/signup` · `/login` · `/logout`, GET `/api/auth/me` | Accounts (§18) |
 | POST 🔒 | `/api/transactions` | Save and score a transaction |
 | POST 🔒 | `/api/transactions/import` | CSV import |
+| POST 🔒 | `/api/transactions/batch` | Save up to 50 transactions at once (multi-screenshot scan); skips references already in the history |
 | GET 🔒 | `/api/transactions` | Search / filter / sort / paginate |
 | GET / PATCH / DELETE 🔒 | `/api/transactions/{id}` | Read, review, delete |
 | POST 🔒 | `/api/transactions/rescore` | Rescore the whole history |

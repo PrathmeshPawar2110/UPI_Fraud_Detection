@@ -89,6 +89,44 @@ def import_csv(body: ImportBody, user: User = Depends(current_user), db: Session
     return ImportResult(imported=len(new), errors=errors[:50], high_risk=sum(t.risk_level == "high" for t in new))
 
 
+MAX_BATCH = 50
+
+
+class BatchBody(BaseModel):
+    items: list[TransactionIn] = Field(min_length=1, max_length=MAX_BATCH)
+
+
+class BatchResult(BaseModel):
+    saved: list[TransactionOut]
+    skipped: list[dict]   # {index, reason}
+    high_risk: int
+
+
+@router.post("/transactions/batch", response_model=BatchResult)
+def create_batch(body: BatchBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Save several transactions at once (e.g. a batch of scanned screenshots). Payments whose reference
+    (UTR) is already in the user's history, or repeated within the batch, are skipped, so scanning the
+    same screenshots again doesn't create duplicates."""
+    refs = {r.external_id for r in body.items if r.external_id}
+    known = set(db.scalars(select(Transaction.external_id).where(
+        Transaction.user_id == user.id, Transaction.external_id.in_(refs)))) if refs else set()
+    new, skipped, seen = [], [], set()
+    for i, item in enumerate(body.items):
+        if item.external_id and (item.external_id in known or item.external_id in seen):
+            skipped.append({"index": i, "reason": f"Reference {item.external_id} is already in your history."})
+            continue
+        if item.external_id:
+            seen.add(item.external_id)
+        new.append(_build(user, item))
+    if new:
+        S.rescore_all(db, user, new=new)  # scored before insert: one batched INSERT
+        for tx in new:
+            S.make_alerts(db, user, tx)
+    audit(db, user.id, "transactions.batch", saved=len(new), skipped=len(skipped))
+    db.commit()
+    return BatchResult(saved=new, skipped=skipped, high_risk=sum(t.risk_level == "high" for t in new))
+
+
 @router.get("/transactions", response_model=Page)
 def list_transactions(
     q: Optional[str] = Query(default=None, max_length=120),

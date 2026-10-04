@@ -347,3 +347,31 @@ def test_never_asks_for_credentials():
     for schema in spec["components"]["schemas"].values():
         fields |= {f.lower() for f in schema.get("properties", {})}
     assert not fields & {"pin", "upi_pin", "mpin", "otp", "cvv", "bank_password", "card_number"}
+
+
+# ---------- batch save (multiple scanned screenshots) ----------
+
+def test_batch_save_scores_and_skips_duplicates(user):
+    items = [
+        tx(external_id="512345678901", amount=500, counterparty_upi="chai@ybl"),
+        tx(external_id="512345678902", direction="received", amount=300, balance_before=None,
+           counterparty_upi="friend@okaxis"),
+        tx(external_id="512345678901", amount=500),                      # repeated in the batch
+        tx(amount=181000, balance_before=181000, occurred_at=NOW.replace(hour=3).isoformat()),  # no reference
+    ]
+    r = user.post("/api/transactions/batch", json={"items": items})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["saved"]) == 3 and [s["index"] for s in body["skipped"]] == [2]
+    assert all(t["risk_level"] for t in body["saved"]) and body["high_risk"] == 1
+    assert user.get("/api/alerts").json()["unread"] >= 1
+    again = user.post("/api/transactions/batch", json={"items": items[:2]}).json()   # same screenshots again
+    assert again["saved"] == [] and len(again["skipped"]) == 2
+    assert user.get("/api/transactions").json()["total"] == 3
+
+
+def test_batch_validation_and_auth(user):
+    assert user.post("/api/transactions/batch", json={"items": []}).status_code == 400
+    assert user.post("/api/transactions/batch", json={"items": [tx()] * 51}).status_code == 400
+    assert user.post("/api/transactions/batch", json={"items": [tx(amount=-1)]}).status_code == 400
+    assert TestClient(app).post("/api/transactions/batch", json={"items": [tx()]}).status_code == 401  # signed out

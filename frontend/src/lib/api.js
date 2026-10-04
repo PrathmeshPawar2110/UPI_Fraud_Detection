@@ -44,6 +44,7 @@ export const logout = () => post("/api/auth/logout");
 // Transactions & investigation
 export const createTransaction = (body) => post("/api/transactions", body);
 export const importCsv = (csv) => post("/api/transactions/import", { csv });
+export const createTransactionsBatch = (items) => post("/api/transactions/batch", { items });
 export const listTransactions = (params) => get("/api/transactions", params);
 export const getTransaction = (id) => get(`/api/transactions/${id}`);
 export const reviewTransaction = (id, review_status) => patch(`/api/transactions/${id}`, { review_status });

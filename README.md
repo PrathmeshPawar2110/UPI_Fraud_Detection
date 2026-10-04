@@ -4,7 +4,7 @@
 
 | | What it does |
 |---|---|
-| **Check** | Upload a GPay / PhonePe / Paytm / BHIM screenshot (read in the browser) or type the details. Get a risk level with reasons from an ML model (sent money) or rules (received money) |
+| **Check** | Upload one or several (up to 20) GPay / PhonePe / Paytm / BHIM screenshots (read in the browser) or type the details; signed-in users can save a whole batch to their history at once, with duplicates skipped by reference number. Get a risk level with reasons from an ML model (sent money) or rules (received money) |
 | **Detect** | Save payments or import a CSV. A pattern engine compares each one with your history: rapid transfers, new recipient, unusual amount or time, balance drain, repeated payments to a new payee, paying back a recent sender, new device |
 | **Explain** | A unified 0–100 risk score shows the points each source added: model (TreeSHAP reasons), rules, patterns, community reports |
 | **Investigate** | Timeline, related payments, counterparty profile, notes, review status, and an opt-in AI investigator (Anthropic Claude, OpenAI, Azure OpenAI or Google Gemini) that explains the stored evidence with verified citations |
@@ -178,8 +178,8 @@ Commit all three files in `backend/app/model/`. The API serves `trees.json`, and
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 164 tests
-cd frontend && npm test                                                  # 8 OCR parser tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 172 tests
+cd frontend && npm test                                                  # 11 tests: OCR parser, batch mapping
 ```
 
 - **Original checker:** model info, the 10 sample transactions score as labelled, validation errors, every received-money rule.
