@@ -180,14 +180,14 @@ Commit all three files in `backend/app/model/`. The API serves `trees.json`, and
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 191 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 198 tests
 cd frontend && npm test                                                  # 11 tests: OCR parser, batch mapping
 ```
 
 - **Original checker:** model info, the 10 sample transactions score as labelled, validation errors, every received-money rule.
 - **Predictor parity:** the pure-Python model matches LightGBM's probabilities (to 1e-12) and SHAP values (to 1e-9) on 320 rows.
 - **Engines:** every history pattern and its near-misses, unified-risk properties (never below the strongest signal, model-only results unchanged, no double counting), scanners for 11 message scam types, 10 URL verdicts, QR tricks and UPI IDs, secret masking.
-- **Platform:** sign-up and sessions, login throttling, another user gets 404 on every record, CSV import, cases and incident reports, aggregate-only community reports, all 9 simulator scenarios, statement upload (bank and wallet PDFs incl. locked ones, bank Excel with account details above the table, debit / credit columns, signed amounts, HTML ".xls", duplicates, zip-bomb and size limits), graph cycles, settings, export and deletion, security headers, CSP parity with `vercel.json`, no PIN / OTP fields anywhere in the API.
+- **Platform:** sign-up and sessions, login throttling, another user gets 404 on every record, CSV import, cases and incident reports, aggregate-only community reports, all 9 simulator scenarios, statement upload (bank and wallet PDFs incl. locked ones and ICICI's ruled three-line-header layout, date-only statements, repeated same-day payments vs duplicates, bank Excel with account details above the table, debit / credit columns, signed amounts, HTML ".xls", duplicates, zip-bomb and size limits), graph cycles, settings, export and deletion, security headers, CSP parity with `vercel.json`, no PIN / OTP fields anywhere in the API.
 - **AI investigator:** with fake Anthropic and OpenAI-style clients: provider selection and missing-setting messages, the tool loop for all four providers, Gemini schema conversion, consent, user-scoped tools, citation checking, error mapping, daily limit.
 - **OCR parser:** receipts for each app with typical OCR noise (made-up names and numbers).
 
@@ -355,7 +355,7 @@ backend/
   app/predictor.py                   pure-Python tree inference + TreeSHAP (no lightgbm at runtime)
   app/received.py                    rule-based check for money received
   app/model/                         trees.json (served), fraud_model.txt (LightGBM), meta.json
-  tests/                             191 tests: API, engines, scanners, platform, AI, predictor parity
+  tests/                             198 tests: API, engines, scanners, platform, AI, predictor parity
 
 frontend/
   vite.config.js                     dev server, proxies /api to the backend

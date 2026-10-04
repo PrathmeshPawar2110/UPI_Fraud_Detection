@@ -9,14 +9,17 @@ from app.engine import csv_import
 MAX = 2000
 
 
-def pdf(pages, height=842) -> bytes:
-    """A minimal PDF: each page is a list of (x, y-from-top, text, size) drawn in Helvetica."""
+def pdf(pages, height=842, rules=None) -> bytes:
+    """A minimal PDF: each page is a list of (x, y-from-top, text, size) drawn in Helvetica, plus optional
+    horizontal rules ({page: [y-from-top, …]}) drawn across the table, like a bank's row separators."""
     esc = lambda t: t.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
     objs = ["<< /Type /Catalog /Pages 2 0 R >>", None,
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"]
     kids = []
-    for cells in pages:
-        stream = "".join(f"BT /F1 {size} Tf {x} {height - y} Td ({esc(t)}) Tj ET\n" for x, y, t, size in cells).encode("latin-1")
+    for n, cells in enumerate(pages):
+        drawn = "".join(f"0.5 w 20 {height - y} m 575 {height - y} l S\n" for y in (rules or {}).get(n, []))
+        stream = (drawn + "".join(f"BT /F1 {size} Tf {x} {height - y} Td ({esc(t)}) Tj ET\n"
+                                  for x, y, t, size in cells)).encode("latin-1")
         objs.append(b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"endstream")
         objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 {height}] /Resources << /Font << /F1 3 0 R >> >> "
                     f"/Contents {len(objs)} 0 R >>")

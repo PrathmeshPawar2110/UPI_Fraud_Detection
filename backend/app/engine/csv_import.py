@@ -43,7 +43,8 @@ ALIASES = {
     "balance_before": ["balance before", "opening balance", "balance_before"],
     "balance_after": ["balance after", "closing balance", "balance", "balance_after", "balance (inr)", "balance(inr)"],
     "category": ["category", "tags"],
-    "note": ["note", "remarks", "description", "narration", "particulars", "comment"],
+    "note": ["note", "remarks", "description", "narration", "particulars", "comment", "transaction remarks",
+             "transaction description", "transaction particulars"],
     "device_id": ["device", "device id", "device_id"],
     "location": ["location", "city"],
 }
@@ -71,6 +72,8 @@ UPI_REF = re.compile(r"(?<!\d)(\d{12})(?!\d)")
 # Wallet PDFs put the reference lines under the name in the same cell: "Paid to JIO Postpaid Transaction ID T24… UTR No. 4123…"
 NAME_TAIL = re.compile(r"\s+(upi\s+)?(transaction\s+id|txn\s+id|utr\b|upi\s+ref|ref(erence)?\s+no|order\s+id|paid\s+by|"
                        r"debited\s+from|credited\s+to|bank\s+ref).*$", re.I | re.S)
+# "UPI/CHAI POINT/chaipoint@ybl/…", "UPI-CHAI POINT-chaipoint@ybl-…", "UPI/DR/612345678901/MEENA/YBL/…"
+NARR_NAME = re.compile(r"\bUPI[/-](?:(?:DR|CR|P2A|P2M)[/-])?(?:\d{6,}[/-])?([A-Za-z][A-Za-z .&']{1,39}?)\s*[/-]")
 PARTY_PREFIX = re.compile(r"^(paid to|sent to|money sent to|transfer to|received from|money received from|"
                           r"payment from|payment to)\s+", re.I)
 
@@ -329,6 +332,10 @@ def parse_rows(rows: list[list[str]], max_rows: int) -> tuple[list[TransactionIn
     return out, errors
 
 
+def _looks_like_name(s: str) -> bool:
+    return 2 <= len(s) <= 40 and "/" not in s and "@" not in s and not s.upper().startswith(("UPI", "NEFT-", "IMPS"))
+
+
 def _row(get) -> dict:
     occurred = parse_date(get("occurred_at"))
     if get("time") and occurred.time() == time(0, 0):
@@ -362,14 +369,19 @@ def _row(get) -> dict:
     for f in ("payment_app", "external_id", "category", "device_id", "location"):
         if get(f):
             data[f] = get(f)
-    name = NAME_TAIL.sub("", PARTY_PREFIX.sub("", get("counterparty_name"))).strip(" :-")
+    name = " ".join(NAME_TAIL.sub("", PARTY_PREFIX.sub("", get("counterparty_name"))).split()).strip(" :-")
+    note_lines = [ln.strip() for ln in get("note").split("\n") if ln.strip()]
+    if not name and len(note_lines) > 1 and _looks_like_name(note_lines[0]):
+        name = note_lines[0]  # PDF statements often print the payee's name on the narration's first line
+    if not name and (m := NARR_NAME.search(text)):
+        name = m.group(1).strip()
     upi = get("counterparty_upi") or (m.group(1) if (m := VPA.search(text)) else "")
     if upi:
         data["counterparty_upi"] = upi.lower()
     if name and not VPA.fullmatch(name):
         data["counterparty_name"] = name[:120]
     if get("note"):
-        data["note"] = get("note")[:280]
+        data["note"] = " ".join(get("note").split())[:280]
     if "external_id" not in data and (m := UPI_REF.search(text)):
         data["external_id"] = m.group(1)
     for f in ("balance_before", "balance_after"):

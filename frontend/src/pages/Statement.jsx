@@ -88,7 +88,7 @@ export default function Statement() {
             </label>
             <p className="small-print">PDF, Excel (.xlsx, .xls) or CSV, up to 4 MB (about 2,000 payments).
               Payments you've already saved are skipped, so it's safe to upload overlapping months.</p>
-            {busy && file && <p className="small-print" role="status">Reading {file.name}…</p>}
+            {busy && file && <p className="small-print" role="status">Reading {file.name}… A long PDF statement can take up to a minute.</p>}
             {!busy && (
               <button type="button" className="textbtn" onClick={() => scan(new File([EXAMPLE], "example-statement.csv", { type: "text/csv" }))}>
                 Try with an example statement

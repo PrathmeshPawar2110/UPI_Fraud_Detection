@@ -9,7 +9,7 @@ reflect how strongly each pattern alone points to fraud, not learned from data.
 """
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from statistics import median
 from typing import Any, Iterable, Protocol
 
@@ -49,6 +49,12 @@ def party(tx: Tx) -> str | None:
     return key or None
 
 
+def time_known(tx: Tx) -> bool:
+    """False for imported statement rows that only had a date (stored at exactly 00:00:00). Their time
+    of day is unknown, so time-based checks (rapid transfers, bursts, unusual hour) must skip them."""
+    return not (getattr(tx, "source", None) == "csv" and tx.occurred_at.time() == time(0, 0))
+
+
 def outgoing(tx: Tx) -> bool:
     return tx.direction in ("sent", "cash_out")
 
@@ -82,7 +88,7 @@ def prior_of(tx: Tx, history: Iterable[Tx]) -> list[Tx]:
 
 def baseline(prior: list[Tx]) -> dict:
     out_amounts = [h.amount for h in prior if outgoing(h)]
-    hours = [h.occurred_at.hour for h in prior]
+    hours = [h.occurred_at.hour for h in prior if time_known(h)]
     common = sorted({h: hours.count(h) for h in set(hours)}.items(), key=lambda kv: -kv[1])[:3]
     return {
         "history_count": len(prior),
@@ -99,9 +105,11 @@ def detect(tx: Tx, history: Iterable[Tx], presorted: bool = False) -> list[Patte
     t, key = tx.occurred_at, party(tx)
     found: list[Pattern] = []
 
+    timed = time_known(tx)
+
     # 1. Rapid transfers: 3+ outgoing payments within 5 minutes
-    if outgoing(tx):
-        window = [h for h in prior if outgoing(h) and h.occurred_at >= t - timedelta(minutes=5)] + [tx]
+    if outgoing(tx) and timed:
+        window = [h for h in prior if outgoing(h) and time_known(h) and h.occurred_at >= t - timedelta(minutes=5)] + [tx]
         if len(window) >= 3:
             total = sum(h.amount for h in window)
             found.append(Pattern(
@@ -111,8 +119,8 @@ def detect(tx: Tx, history: Iterable[Tx], presorted: bool = False) -> list[Patte
                 {"count": len(window), "total": round(total, 2), "window_minutes": 5}))
 
     # 6. Transaction burst: 6+ transactions of any kind within an hour (if rapid transfers didn't fire)
-    if not any(p.code == "RAPID_TRANSFER" for p in found):
-        hour_window = [h for h in prior if h.occurred_at >= t - timedelta(hours=1)] + [tx]
+    if timed and not any(p.code == "RAPID_TRANSFER" for p in found):
+        hour_window = [h for h in prior if time_known(h) and h.occurred_at >= t - timedelta(hours=1)] + [tx]
         if len(hour_window) >= 6:
             found.append(Pattern(
                 "TRANSACTION_BURST", "Transaction burst",
@@ -147,13 +155,14 @@ def detect(tx: Tx, history: Iterable[Tx], presorted: bool = False) -> list[Patte
                                 "typical_range": [round(lo, 2), round(hi, 2)]}))
 
     # 5. Unusual hour: a late-night payment at an hour the user almost never transacts
-    if len(prior) >= MIN_HOUR_HISTORY and t.hour <= 5:
-        near = sum(1 for h in prior if min((h.occurred_at.hour - t.hour) % 24, (t.hour - h.occurred_at.hour) % 24) <= 1)
-        if near / len(prior) < 0.05:
+    timed_prior = [h for h in prior if time_known(h)] if timed else []
+    if len(timed_prior) >= MIN_HOUR_HISTORY and t.hour <= 5:
+        near = sum(1 for h in timed_prior if min((h.occurred_at.hour - t.hour) % 24, (t.hour - h.occurred_at.hour) % 24) <= 1)
+        if near / len(timed_prior) < 0.05:
             found.append(Pattern(
                 "UNUSUAL_HOUR", "Unusual time",
-                f"Made at {t:%H:%M}; only {near} of your {len(prior)} earlier transactions were around this hour.",
-                0.3, "medium", {"hour": t.hour, "nearby_count": near, "history_count": len(prior)}))
+                f"Made at {t:%H:%M}; only {near} of your {len(timed_prior)} earlier transactions were around this hour.",
+                0.3, "medium", {"hour": t.hour, "nearby_count": near, "history_count": len(timed_prior)}))
 
     # 7. Recipient concentration: 3+ payments in 24 h to someone first paid within those 24 h
     if outgoing(tx) and key:

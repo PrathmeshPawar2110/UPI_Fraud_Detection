@@ -55,6 +55,12 @@ def reputation_score(distinct_reporters: int) -> float:
     return 0.0 if distinct_reporters <= 0 else 0.20 if distinct_reporters == 1 else 0.35 if distinct_reporters == 2 else 0.45
 
 
+def _hour(tx) -> int:
+    """Hour of day for the model and rules. A statement row with only a date has no hour: use midday
+    rather than letting it read as midnight, the riskiest hour."""
+    return tx.occurred_at.hour if P.time_known(tx) else 12
+
+
 def _model_component(tx, explain: bool) -> dict:
     if tx.direction not in ("sent", "cash_out"):
         return {"available": False, "note": "The model covers money going out only."}
@@ -63,7 +69,7 @@ def _model_component(tx, explain: bool) -> dict:
     try:
         inp = ModelInput(
             type="CASH_OUT" if tx.direction == "cash_out" else "TRANSFER",
-            amount=tx.amount, hour=tx.occurred_at.hour, sender_balance_before=tx.balance_before,
+            amount=tx.amount, hour=_hour(tx), sender_balance_before=tx.balance_before,
             sender_balance_after=tx.balance_after, receiver_balance_before=tx.receiver_balance_before,
             receiver_balance_after=tx.receiver_balance_after)
     except ValidationError as e:
@@ -73,6 +79,8 @@ def _model_component(tx, explain: bool) -> dict:
     else:  # bulk imports: probability only (TreeSHAP is ~30 ms per row); explained on first view
         r = predict_only(inp)
     s = calibrate_model(r["probability"])
+    if not P.time_known(tx):  # scored at a neutral midday hour; don't explain with a made-up time
+        r["reasons"] = [x for x in r["reasons"] if x.get("group") != "time"]
     return {"available": True, "probability": r["probability"], "score": s, "level": r["risk"],
             "reasons": r["reasons"], "explained": explain, "used_receiver_balances": r["used_receiver_balances"]}
 
@@ -83,7 +91,7 @@ def _rules_component(tx) -> dict:
         return {"available": False}
     if not all(ans.get(k) for k in ("knows_sender", "in_bank", "asked_to_pay")):
         return {"available": False, "note": "Answer the three received-money questions to run these rules."}
-    r = check_received(ReceivedPayment(amount=tx.amount, hour=tx.occurred_at.hour, **{
+    r = check_received(ReceivedPayment(amount=tx.amount, hour=_hour(tx), **{
         k: ans[k] for k in ("knows_sender", "in_bank", "asked_to_pay")}))
     return {"available": True, "score": RULE_SCORE[r["risk"]], "level": r["risk"], "reasons": r["reasons"]}
 

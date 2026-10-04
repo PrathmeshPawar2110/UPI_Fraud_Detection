@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from .. import config, services as S
 from ..auth import audit, current_user
@@ -78,26 +79,46 @@ def create(body: TransactionIn, user: User = Depends(current_user), db: Session 
 
 
 def _key(t) -> tuple:
+    """Same moment, amount, direction, party and running balance. Statements often give only the date,
+    so repeated same-day payments (four ₹2,000 SIPs) differ only by the balance after each one."""
     party = (t.counterparty_upi or t.counterparty_name or "").strip().lower()
-    return (t.occurred_at.replace(tzinfo=None, second=0, microsecond=0), round(float(t.amount), 2), t.direction, party)
+    balance = None if t.balance_after is None else round(float(t.balance_after), 2)
+    return (t.occurred_at.replace(tzinfo=None, second=0, microsecond=0), round(float(t.amount), 2), t.direction, party, balance)
+
+
+def _ref(t) -> tuple | None:
+    """A reference only identifies a payment together with its direction and amount: a refund reuses the
+    payment's reference, and a number picked from a narration can be an account number seen on many rows."""
+    return (t.external_id, t.direction, round(float(t.amount), 2)) if t.external_id else None
 
 
 def _import(db: Session, user: User, rows: list[TransactionIn], errors: list[dict], source: str) -> ImportResult:
-    """Save parsed rows, skipping ones already in the history (same reference, or same time, amount,
-    direction and party) so overlapping statements can be uploaded again safely."""
+    """Save parsed rows, skipping ones already in the history (same reference, direction and amount, or
+    same time, amount, direction, party and balance) so overlapping statements can be uploaded again safely."""
     if not rows:
-        raise HTTPException(status_code=400, detail=errors[0]["error"] if errors else "No payments found in the file.")
+        if not errors:
+            raise HTTPException(status_code=400, detail="No payments found in the file.")
+        first = errors[0]
+        raise HTTPException(status_code=400, detail=f"Couldn't read any payments from this file ({len(errors)} rows). "
+                                                    f"The first problem, on line {first['line']}: {first['error']}")
     existing = S.history(db, user)
-    refs = {t.external_id for t in existing if t.external_id}
-    keys = {_key(t) for t in existing}
+    refs = {_ref(t) for t in existing} - {None}
+    keys: dict[tuple, set] = {}  # key -> references seen with it (None = no reference)
+    for t in existing:
+        keys.setdefault(_key(t), set()).add(t.external_id)
     new, duplicates = [], 0
     for r in rows:
-        k = _key(r)
-        if (r.external_id and r.external_id in refs) or k in keys:
+        k, ref = _key(r), _ref(r)
+        seen = keys.get(k)
+        # Same key but both rows carry different references: two real payments (₹454.90 twice in a day,
+        # with a refund in between, leaves the same balance after each).
+        same_key = seen is not None and (r.external_id is None or None in seen or r.external_id in seen)
+        if (ref and ref in refs) or same_key:
             duplicates += 1
             continue
-        refs.add(r.external_id) if r.external_id else None
-        keys.add(k)
+        if ref:
+            refs.add(ref)
+        keys.setdefault(k, set()).add(r.external_id)
         new.append(_build(user, r))
     if new:
         S.rescore_all(db, user, new=new)  # scored before insert: one batched INSERT, no per-row UPDATEs
@@ -137,14 +158,17 @@ async def import_file(request: Request, name: str = Query(default="", max_length
         raise HTTPException(status_code=400, detail="The file is empty.")
     if len(data) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="That file is too large (max 4 MB).")
-    try:
-        rows, errors = csv_import.parse_file(name, data, config.MAX_IMPORT_ROWS, password)
-    except PdfPasswordError as e:
-        raise HTTPException(status_code=423, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    kind = "pdf" if data.lstrip()[:5] == b"%PDF-" else "xlsx" if data[:2] == b"PK" else "file"
-    return _import(db, user, rows, errors, kind)
+    def work():  # parsing a long PDF takes seconds: run it (and the DB work) off the event loop
+        try:
+            rows, errors = csv_import.parse_file(name, data, config.MAX_IMPORT_ROWS, password)
+        except PdfPasswordError as e:
+            raise HTTPException(status_code=423, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        kind = "pdf" if data.lstrip()[:5] == b"%PDF-" else "xlsx" if data[:2] == b"PK" else "file"
+        return _import(db, user, rows, errors, kind)
+
+    return await run_in_threadpool(work)
 
 
 MAX_BATCH = 50

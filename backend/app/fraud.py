@@ -136,6 +136,6 @@ def score(t: Transaction) -> dict:
         "probability": p,
         "risk": risk,
         "meter": meter_position(p),
-        "reasons": [{k: r[k] for k in ("text", "direction")} for r in explain(row, contrib, dest_known)],
+        "reasons": [{k: r[k] for k in ("text", "direction", "group")} for r in explain(row, contrib, dest_known)],
         "used_receiver_balances": dest_known,
     }
