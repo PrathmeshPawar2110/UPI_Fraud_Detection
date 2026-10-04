@@ -81,7 +81,7 @@ This document describes how the system works end to end: the data, the model, th
 | QR scanning | jsQR in the browser, camera over HTTPS | The BarcodeDetector API isn't supported in every browser |
 | URL redirect following | Not done | Fetching user-supplied URLs from the server is a server-side request forgery risk |
 | Shared community reports | Built, aggregate counts only | Unverified reports must not expose reporters or label people publicly |
-| Bank PDF statement import | Not built | There's no standard format; CSV import covers the need |
+| Bank PDF statement import | Not built | There's no standard format; statement upload takes the Excel / CSV download every bank offers (§21) |
 | Hindi or Marathi OCR | Not built | Large language data; the text scanner covers Hinglish and common Devanagari words |
 | Voice analysis, federated learning, real Account Aggregator | Not built (future work) | Research or regulated features; Settings shows a clearly labelled AA simulation |
 
@@ -868,7 +868,7 @@ The workflow cancels in-progress runs for the same branch and has read-only repo
 ### 14.1 Automated tests (run in CI on every push and pull request)
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 173 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 186 tests
 cd frontend && npm test                                                  # 11 tests
 ```
 
@@ -879,6 +879,7 @@ cd frontend && npm test                                                  # 11 te
 | `backend/tests/test_engine.py` | 21 | Each pattern fires on its case and not on near-misses, never on too little history, and only looks backwards in time; noisy-OR properties; the model calibration keeps its thresholds; with no history the unified level equals `/api/predict` (backward compatibility); the breakdown sums to the score; balance depletion isn't double-counted; reputation alone never reaches high; history can't suppress a serious signal |
 | `backend/tests/test_scanners.py` | 53 | 11 scam message types (English, Hinglish, Devanagari) and a benign message; 10 URL verdicts, malformed URLs, punycode, secret parameters; QR parsing, receive-trick and invalid payee; UPI ID validation including injection-like strings and lure words without false positives on names; OTP/PIN/card redaction; scanner API limits |
 | `backend/tests/test_platform.py` | 52 | Sign-up, login, logout, cookie flags, throttling, tampered sessions; create / validate / search / review / delete; another user gets 404 on every ID-based endpoint; CSV import with errors and missing columns; bulk rows explained on first view; notes; case workflow and incident report with masked secrets; community reports aggregate-only and withdrawable; reports feed the risk score; alerts; all 9 scenarios detected; demo data, graph cycles and device flags; live stream; settings, export, retention, account deletion; model monitoring; security headers, size limit, unknown API paths, CSP parity, CORS; no credential fields anywhere in the API schema |
+| `backend/tests/test_statement_import.py` | 13 | Bank-style Excel with account details above the table, withdrawal / deposit columns and UPI details in the narration (UPI ID, reference and balance before extracted, drain flagged first); re-upload and overlapping statements skip duplicates; signed amounts and a separate time column; semicolon CSV with debit / credit and running balance; HTML ".xls"; e-mails not taken as UPI IDs; empty, wrong-column, fake and corrupt files; zip bomb; 4 MB limit and sign-in required |
 | `backend/tests/test_ai.py` | 20 | Consent required; not configured → 503 naming the missing variable; provider selection for 9 configurations (auto-detect, explicit choice, missing model, endpoint or key, unsupported provider; secrets never echoed); Gemini schema conversion and strict OpenAI tools; the Anthropic loop feeds real stored evidence back and verifies citations; the OpenAI-compatible loop for OpenAI, Azure and Gemini (system message, token parameter, tool-call IDs, unknown tools, invalid JSON arguments); tools can't read another user's data; error mapping; daily limit; status |
 | `frontend/src/lib/ocrParse.test.js` | 8 | Paytm received, PhonePe received, Google Pay sent, BHIM sent (modelled on real OCR output, with made-up names and numbers), GPay received heading, PhonePe "Paid to", failed status with lakh grouping, and nulls for unrecognisable text |
 | CI runtime check | 1 | The API scores correctly in a venv with only the deployed dependencies |
@@ -1033,7 +1034,11 @@ The engine never lowers risk because of history: repeated legitimate payments on
 
 - **Create** (`POST /api/transactions`): validates the fields (UPI ID `name@handle`, reference `[A-Za-z0-9-]{4,64}`, finite non-negative amounts, length limits), scores the transaction against the user's history and creates alerts. The checker's "Save & investigate" button uses this; masked receipt IDs (`••••0259@ptsbi`) are kept as the name only.
 - **List** (`GET /api/transactions`): search (name, UPI ID, reference, note) plus filters for risk, direction, app, review status, amount range, date range and synthetic data; sorting by newest, oldest, risk or amount; pagination (≤ 200 per page). The query is parameterised by SQLAlchemy, so injection strings are just text (tested).
-- **CSV import** (`POST /api/transactions/import`, body `{csv}`, ≤ 900 KB, ≤ 2,000 rows): column names are matched loosely (`date` / `timestamp` / `txn date`, `type` / `dr/cr`, `amount (inr)`, `upi id` / `vpa`, `utr` / `reference`, `closing balance`, …); directions accept sent / received / cash_out and debit / credit / DR / CR; there are 17 date formats (ISO, DD/MM/YYYY, "03 Oct 2026, 12:48 AM", …). Bad rows are skipped and reported with line numbers; good rows are imported and the whole history is rescored.
+- **Statement import** (`engine/csv_import.py`). `POST /api/transactions/import` takes CSV text (`{csv}`, ≤ 900 KB). `POST /api/transactions/import-file?name=…` takes the file itself as the request body (≤ 4 MB, `MAX_UPLOAD_BYTES`; the body-size middleware allows this one path more than the usual 1 MB). Both accept up to 2,000 rows.
+  - *Formats:* CSV / TSV / semicolon or pipe-separated text (the delimiter is sniffed); `.xlsx` via openpyxl in read-only mode (refused if the unzipped size is over 60 MB, a zip-bomb guard; XML goes through defusedxml); legacy `.xls` via xlrd; and the HTML-table "`.xls`" some banks send. PDF is not supported. The first non-empty sheet is used, and Excel dates become `YYYY-MM-DD HH:MM:SS`.
+  - *Layouts:* the header is the first of the first 40 rows that names a date and an amount, so account details above the table are skipped. Money out / in comes from a direction column (sent / received / debit / credit / DR / CR), from separate debit / credit (withdrawal / deposit) columns, from a signed amount (`-500`, `(500)`, `500 Dr`), or from "Paid to … / Received from …" wording. A separate time column is merged into the date. There are about 40 date formats, and names like `Withdrawal Amount (INR )` are normalised. Blank, opening- or closing-balance and footer rows (no amount) are ignored.
+  - *Enrichment:* when there's no column for them, the UPI ID (not e-mail addresses) and the 12-digit UPI reference are taken from the narration. The balance before each payment is worked out from the running balance column, so the ML model can score statement rows.
+  - *Duplicates:* rows whose reference, or whose time, amount, direction and party, are already saved (or appear earlier in the file) are skipped, so overlapping statements can be uploaded again. The new rows are scored with the whole history. The response lists the high- and medium-risk rows (`flagged`, most dangerous first, up to 100), and bad rows are reported with line numbers.
 - **Review** (`PATCH /api/transactions/{id}`): unreviewed, legitimate, suspicious or confirmed_fraud. Only the user can mark something as confirmed fraud.
 - **Investigation** (`GET /api/investigations/{id}`): the transaction with its full risk breakdown (SHAP computed on first view), a 24-hour timeline either side, same-counterparty and same-hour transactions, the counterparty profile (UPI ID check, totals, first seen, community reports), notes and linked cases. Notes: `POST /api/investigations/{id}/notes` (secrets masked).
 - **Batch save** (`POST /api/transactions/batch`, ≤ 50 items): used by the multi-screenshot scan. Items whose reference (UTR) is already in the user's history, or repeated within the batch, are skipped and reported; the rest are scored before a single batched insert and alerted like single saves.
@@ -1128,10 +1133,11 @@ The interface is built for field merchants who aren't technical: one task per sc
 | `/check` | Three-step wizard: who paid → details (optional screenshot read on the device, amount, time; for received money three Yes / No / Not sure questions, starting with "Has the money reached YOUR bank account?"; for sent money, balance before) → plain verdict, advice, save to My payments. Several screenshots go to `BatchScan.jsx` | No (saving needs one) |
 | `/check/detailed` | The original full checker (all fields, result slip, model info) | No |
 | `/before-you-pay?tab=qr\|upi\|url\|message` | Four big tiles, then one scanner at a time with a plain verdict. `/scan`, `/message-scanner`, `/url-checker`, `/qr-scanner` and `/upi-check` redirect here | No |
+| `/statement` | Scan my statement: upload a bank / UPI statement (CSV, .xlsx, .xls) → plain summary ("1 dangerous payment found"), the flagged payments, rows that couldn't be read. Signed-out users see a sign-up prompt | Yes (prompt shown without) |
 | `/help` | Call 1930, emergency steps, cybercrime.gov.in and Chakshu links, scam explainers ordered for merchants (fake screenshots first). `/emergency` redirects here | No |
 | `/more` | List of advanced tools | No (most tools need one) |
 | `/simulator`, `/learn`, `/privacy`, `/model` | Scenario simulator; scam quiz; privacy notes; model monitoring | No |
-| `/transactions` | My payments: search, a "Show" filter (all / dangerous / be careful / OK), more filters folded away; CSV import and practice data under "More options" (`?import=1` opens it) | Yes |
+| `/transactions` | My payments: search, a "Show" filter (all / dangerous / be careful / OK), more filters folded away; "Upload statement" button; practice data under "More options" | Yes |
 | `/investigate/:id` | Amount and party, plain verdict, a box to add the missing balance (re-scores with the model through `PATCH /api/transactions/{id}`), "Mark this payment" buttons. Score breakdown, evidence, timeline, related payments, counterparty, case, AI panel and notes are under "Full details" | Yes |
 | `/network` | Graph, filters, flagged list, focus mode | Yes |
 | `/alerts` | Alerts and live demo stream with notifications | Yes |
@@ -1150,7 +1156,8 @@ All bodies and responses are JSON; validation errors are HTTP 400 `{"detail": "�
 | POST | `/api/predict` · `/api/check-received` · GET `/api/model-info` | Original checker (unchanged) |
 | POST | `/api/auth/signup` · `/login` · `/logout`, GET `/api/auth/me` | Accounts (§18) |
 | POST 🔒 | `/api/transactions` | Save and score a transaction |
-| POST 🔒 | `/api/transactions/import` | CSV import |
+| POST 🔒 | `/api/transactions/import` | CSV import (body `{csv}`) |
+| POST 🔒 | `/api/transactions/import-file?name=` | Statement upload: the raw file is the body (CSV / TSV / .xlsx / .xls / HTML ".xls", ≤ 4 MB). Returns `imported`, `duplicates`, `high_risk`, `medium_risk`, `errors`, `flagged` |
 | POST 🔒 | `/api/transactions/batch` | Save up to 50 transactions at once (multi-screenshot scan); skips references already in the history |
 | GET 🔒 | `/api/transactions` | Search / filter / sort / paginate |
 | GET / PATCH / DELETE 🔒 | `/api/transactions/{id}` | Read, review, delete |

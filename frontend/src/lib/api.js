@@ -7,7 +7,7 @@ export class ApiError extends Error {
 
 async function request(path, options = {}) {
   const init = { credentials: "same-origin", ...options };
-  if (options.body !== undefined && typeof options.body !== "string") {
+  if (options.body !== undefined && typeof options.body !== "string" && !(options.body instanceof Blob)) {
     init.body = JSON.stringify(options.body);
     init.headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   }
@@ -44,6 +44,9 @@ export const logout = () => post("/api/auth/logout");
 // Transactions & investigation
 export const createTransaction = (body) => post("/api/transactions", body);
 export const importCsv = (csv) => post("/api/transactions/import", { csv });
+// Statement upload (CSV / Excel): the file itself is the body, so nothing is base64-inflated.
+export const importFile = (file) => request(`/api/transactions/import-file?name=${encodeURIComponent(file.name)}`,
+  { method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" } });
 export const createTransactionsBatch = (items) => post("/api/transactions/batch", { items });
 export const listTransactions = (params) => get("/api/transactions", params);
 export const getTransaction = (id) => get(`/api/transactions/${id}`);

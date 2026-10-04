@@ -67,3 +67,4 @@ AZURE_OPENAI_API_VERSION = _env("AZURE_OPENAI_API_VERSION", "2024-10-21")
 # Request limits
 MAX_BODY_BYTES = int(_env("MAX_BODY_BYTES", str(1_000_000)))
 MAX_IMPORT_ROWS = int(_env("MAX_IMPORT_ROWS", "2000"))
+MAX_UPLOAD_BYTES = int(_env("MAX_UPLOAD_BYTES", str(4_000_000)))  # statement files; Vercel caps bodies at 4.5 MB

@@ -60,7 +60,8 @@ CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsd
 @app.middleware("http")
 async def limits_and_headers(request: Request, call_next):
     length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > config.MAX_BODY_BYTES:
+    cap = config.MAX_UPLOAD_BYTES if request.url.path == "/api/transactions/import-file" else config.MAX_BODY_BYTES
+    if length and length.isdigit() and int(length) > cap:
         return JSONResponse(status_code=413, content={"detail": "Request is too large."})
     response = await call_next(request)
     for k, v in SECURITY_HEADERS.items():

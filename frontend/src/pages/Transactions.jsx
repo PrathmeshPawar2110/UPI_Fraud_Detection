@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { ErrorNote, Empty, Loading, Synthetic, TxRow } from "../components/ui.jsx";
-import { importCsv, listTransactions, loadDemo, removeDemo } from "../lib/api.js";
+import { listTransactions, loadDemo, removeDemo } from "../lib/api.js";
 
 const FILTERS = { q: "", risk: "", direction: "", app: "", review: "", min_amount: "", max_amount: "",
                   date_from: "", date_to: "", synthetic: "", sort: "newest" };
 const PAGE = 50;
-const SAMPLE_CSV = "Date,Direction,Amount,Name,UPI ID,Reference,Balance Before\n" +
-  "2026-09-01 10:15,sent,450,Chai Point,chaipoint.ka@ybl,512345678901,42000\n" +
-  "02/09/2026 19:40,debit,1200,Fresh Mart,freshmart.blr@okaxis,,41550\n";
 
 export default function Transactions() {
   const [params, setParams] = useSearchParams();
@@ -16,7 +13,6 @@ export default function Transactions() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [limit, setLimit] = useState(PAGE);
-  const showImport = params.get("import") === "1";
   const [notice, setNotice] = useState("");
 
   const load = useCallback(() => {
@@ -61,7 +57,10 @@ export default function Transactions() {
     <>
       <div className="list-head">
         <h1 className="guided-title">My payments</h1>
-        <Link className="big-btn primary-btn" to="/check">+ Check a payment</Link>
+        <div className="list-actions">
+          <Link className="big-btn ghost-btn" to="/statement">Upload statement</Link>
+          <Link className="big-btn primary-btn" to="/check">+ Check a payment</Link>
+        </div>
       </div>
       <p className="lede">Payments you've checked and saved. Tap one to see if it's safe and what to do.</p>
       {notice && <p className="notice" role="status">{notice}</p>}
@@ -100,8 +99,9 @@ export default function Transactions() {
           <Empty title="No saved payments yet."
                  action={<div className="empty-actions">
                    <Link className="big-btn primary-btn" to="/check">Check a payment</Link>
+                   <Link className="big-btn ghost-btn" to="/statement">Upload a statement</Link>
                  </div>}>
-            Check a payment and tap "Save to My payments". It will appear here.
+            Check a payment and tap "Save to My payments", or upload your bank statement (Excel or CSV) to check every payment in it.
           </Empty>
         )
       ) : (
@@ -114,9 +114,8 @@ export default function Transactions() {
         </>
       )}
 
-      <details className="more-details list-more" open={showImport}>
+      <details className="more-details list-more">
         <summary>More options</summary>
-        <ImportPanel onDone={(msg) => { setNotice(msg); load(); window.dispatchEvent(new Event("upig:alerts")); }} />
         <section className="demo-box">
           <p><Synthetic /> Practice data: about 90 days of everyday payments with a few scams mixed in. Not real bank data.</p>
           <div className="empty-actions">
@@ -137,65 +136,5 @@ function Select({ id, label, value, onChange, options }) {
         {options.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
       </select>
     </div>
-  );
-}
-
-function ImportPanel({ onDone }) {
-  const [text, setText] = useState("");
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
-
-  async function pick(e) {
-    const f = e.target.files[0];
-    if (!f) return;
-    if (!/\.(csv|txt)$/i.test(f.name) && !/text|csv/.test(f.type)) return setError(new Error("Please choose a .csv file."));
-    if (f.size > 850_000) return setError(new Error("That file is too large (max ~850 KB, about 2,000 rows)."));
-    setError(null);
-    setName(f.name);
-    setText(await f.text());
-  }
-
-  async function submit() {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await importCsv(text);
-      setResult(r);
-      onDone(`Imported ${r.imported} transactions (${r.high_risk} high risk).`);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="panel">
-      <h2 className="panel-title">Import transactions from CSV</h2>
-      <p className="muted">Needs a date/time, a direction (sent/received, or debit/credit) and an amount. Optional: name, UPI ID,
-        reference, balance before/after, app, note. Dates like 2026-09-01 10:15 or 01/09/2026 10:15.
-        <button type="button" className="textbtn" onClick={() => { setText(SAMPLE_CSV); setName("example.csv"); }}>Use an example</button></p>
-      <div className="row">
-        <div className="field">
-          <label htmlFor="csvfile">CSV file</label>
-          <input id="csvfile" type="file" accept=".csv,text/csv,text/plain" onChange={pick} />
-        </div>
-        <div className="field">
-          <label htmlFor="csvtext">…or paste rows</label>
-          <textarea id="csvtext" rows={4} value={text} onChange={(e) => { setText(e.target.value); setName(""); }} />
-        </div>
-      </div>
-      {name && <p className="note">Selected: {name}</p>}
-      <button type="button" className="primary" disabled={!text.trim() || busy} onClick={submit}>{busy ? "Importing…" : "Import"}</button>
-      <ErrorNote error={error} />
-      {result?.errors?.length > 0 && (
-        <details className="import-errors" open>
-          <summary>{result.errors.length} row{result.errors.length > 1 ? "s" : ""} skipped</summary>
-          <ul>{result.errors.map((e, i) => <li key={i}>Line {e.line}: {e.error}</li>)}</ul>
-        </details>
-      )}
-    </section>
   );
 }

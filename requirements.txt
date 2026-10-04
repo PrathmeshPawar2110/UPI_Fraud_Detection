@@ -6,3 +6,6 @@ sqlalchemy>=2.0          # database (Postgres in production, SQLite locally)
 pg8000>=1.31            # Postgres driver (pure Python)
 anthropic>=0.40          # AI investigator: Anthropic provider
 openai>=1.50             # AI investigator: OpenAI, Azure OpenAI and Gemini (OpenAI-compatible) providers
+openpyxl>=3.1           # statement upload: .xlsx
+xlrd>=2.0                # statement upload: legacy .xls
+defusedxml>=0.7          # openpyxl parses XML through it when installed

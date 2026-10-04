@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -33,6 +33,9 @@ class ImportResult(BaseModel):
     imported: int
     errors: list[dict]
     high_risk: int
+    medium_risk: int = 0
+    duplicates: int = 0
+    flagged: list[TransactionOut] = []   # the risky rows of this import, most risky first (up to 100)
 
 
 class Review(BaseModel):
@@ -74,22 +77,66 @@ def create(body: TransactionIn, user: User = Depends(current_user), db: Session 
     return tx
 
 
+def _key(t) -> tuple:
+    party = (t.counterparty_upi or t.counterparty_name or "").strip().lower()
+    return (t.occurred_at.replace(tzinfo=None, second=0, microsecond=0), round(float(t.amount), 2), t.direction, party)
+
+
+def _import(db: Session, user: User, rows: list[TransactionIn], errors: list[dict], source: str) -> ImportResult:
+    """Save parsed rows, skipping ones already in the history (same reference, or same time, amount,
+    direction and party) so overlapping statements can be uploaded again safely."""
+    if not rows:
+        raise HTTPException(status_code=400, detail=errors[0]["error"] if errors else "No payments found in the file.")
+    existing = S.history(db, user)
+    refs = {t.external_id for t in existing if t.external_id}
+    keys = {_key(t) for t in existing}
+    new, duplicates = [], 0
+    for r in rows:
+        k = _key(r)
+        if (r.external_id and r.external_id in refs) or k in keys:
+            duplicates += 1
+            continue
+        refs.add(r.external_id) if r.external_id else None
+        keys.add(k)
+        new.append(_build(user, r))
+    if new:
+        S.rescore_all(db, user, new=new)  # scored before insert: one batched INSERT, no per-row UPDATEs
+        for tx in new:
+            if tx.risk_level == "high":
+                S.make_alerts(db, user, tx)
+    audit(db, user.id, "transactions.import", rows=len(new), errors=len(errors), duplicates=duplicates, source=source)
+    db.commit()
+    rank = {"high": 0, "medium": 1}
+    flagged = sorted((t for t in new if t.risk_level in rank),
+                     key=lambda t: (rank[t.risk_level], -(t.risk_score or 0), t.occurred_at))
+    return ImportResult(imported=len(new), errors=errors[:50], duplicates=duplicates,
+                        high_risk=sum(t.risk_level == "high" for t in new),
+                        medium_risk=sum(t.risk_level == "medium" for t in new), flagged=flagged[:100])
+
+
 @router.post("/transactions/import", response_model=ImportResult)
 def import_csv(body: ImportBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
     try:
         rows, errors = csv_import.parse(body.csv, config.MAX_IMPORT_ROWS)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    if not rows:
-        raise HTTPException(status_code=400, detail=errors[0]["error"] if errors else "No rows to import.")
-    new = [_build(user, r) for r in rows]
-    S.rescore_all(db, user, new=new)  # scored before insert: one batched INSERT, no per-row UPDATEs
-    for tx in new:
-        if tx.risk_level == "high":
-            S.make_alerts(db, user, tx)
-    audit(db, user.id, "transactions.import", rows=len(new), errors=len(errors))
-    db.commit()
-    return ImportResult(imported=len(new), errors=errors[:50], high_risk=sum(t.risk_level == "high" for t in new))
+    return _import(db, user, rows, errors, "csv")
+
+
+@router.post("/transactions/import-file", response_model=ImportResult)
+async def import_file(request: Request, name: str = Query(default="", max_length=255),
+                      user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Upload a statement as-is (CSV, TSV, .xlsx, .xls, or a bank's HTML ".xls"); the raw bytes are the body."""
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="The file is empty.")
+    if len(data) > config.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="That file is too large (max 4 MB).")
+    try:
+        rows, errors = csv_import.parse_file(name, data, config.MAX_IMPORT_ROWS)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _import(db, user, rows, errors, "xlsx" if data[:2] == b"PK" else "file")
 
 
 MAX_BATCH = 50

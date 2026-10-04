@@ -47,6 +47,13 @@ jobs:
           from app.schemas import Transaction
           res = score(Transaction(type="TRANSFER", amount=181000, hour=3, sender_balance_before=181000))
           assert res["risk"] == "high", res
+          import io, xlrd  # statement upload: Excel readers are importable in the bundle
+          from openpyxl import Workbook
+          from app.engine.csv_import import parse_file
+          wb = Workbook(); wb.active.append(["Date", "Debit", "Credit"]); wb.active.append(["2026-09-01", 100, None])
+          buf = io.BytesIO(); wb.save(buf)
+          rows, errors = parse_file("s.xlsx", buf.getvalue(), 10)
+          assert len(rows) == 1 and rows[0].direction == "sent" and not errors, (rows, errors)
           print("ok:", res["risk"], round(res["probability"], 4), len(app.openapi()["paths"]), "API paths")
           EOF
 

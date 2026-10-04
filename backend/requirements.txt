@@ -5,3 +5,6 @@ sqlalchemy>=2.0
 pg8000>=1.31
 anthropic>=0.40        # AI investigator: Anthropic
 openai>=1.50           # AI investigator: OpenAI, Azure OpenAI, Gemini
+openpyxl>=3.1          # statement upload: .xlsx
+xlrd>=2.0              # statement upload: legacy .xls
+defusedxml>=0.7

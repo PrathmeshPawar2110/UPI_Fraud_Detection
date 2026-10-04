@@ -5,7 +5,7 @@
 | | What it does |
 |---|---|
 | **Check** | Upload one or several (up to 20) GPay / PhonePe / Paytm / BHIM screenshots (read in the browser) or type the details; signed-in users can save a whole batch to their history at once, with duplicates skipped by reference number. Get a risk level with reasons from an ML model (sent money) or rules (received money) |
-| **Detect** | Save payments or import a CSV. A pattern engine compares each one with your history: rapid transfers, new recipient, unusual amount or time, balance drain, repeated payments to a new payee, paying back a recent sender, new device |
+| **Detect** | Save payments or upload a bank / UPI statement (CSV or Excel). Every payment in it is checked and the risky ones are listed. A pattern engine compares each one with your history: rapid transfers, new recipient, unusual amount or time, balance drain, repeated payments to a new payee, paying back a recent sender, new device |
 | **Explain** | A unified 0–100 risk score shows the points each source added: model (TreeSHAP reasons), rules, patterns, community reports |
 | **Investigate** | Timeline, related payments, counterparty profile, notes, review status, and an opt-in AI investigator (Anthropic Claude, OpenAI, Azure OpenAI or Google Gemini) that explains the stored evidence with verified citations |
 | **Connect** | Relationship graph with flagged entities, circular money flows and suspicious clusters |
@@ -19,7 +19,7 @@ The model is LightGBM trained on **PaySim**, as recommended in [data-and-scope.m
 
 **Stack:** React 19 + Vite + React Router (`frontend/`) · FastAPI + SQLAlchemy (Postgres / SQLite) + LightGBM-exported model (`backend/`) · Tesseract.js and jsQR in the browser · optional LLM (Anthropic / OpenAI / Azure OpenAI / Gemini) · Vercel + GitHub Actions
 
-**Made for merchants.** The app has five sections: **Home · Check payment · Before you pay · My payments · Help**. On a phone they appear as a bottom tab bar. Each check is a short series of steps and ends with a plain answer (*Looks OK*, *Be careful* or *Do not trust this payment*) and what to do next. Scores and evidence are folded under "Full details". Investigator tools (cases, alerts, connections map, simulator, quiz) are under **More tools**.
+**Made for merchants.** The app has five sections: **Home · Check payment · Before you pay · My payments · Help**. On a phone they appear as a bottom tab bar. **Scan my statement** takes a bank or UPI statement (Excel .xlsx / .xls or CSV, up to 4 MB) and lists the dangerous payments in it. Each check is a short series of steps and ends with a plain answer (*Looks OK*, *Be careful* or *Do not trust this payment*) and what to do next. Scores and evidence are folded under "Full details". Investigator tools (cases, alerts, connections map, simulator, quiz) are under **More tools**.
 
 Full technical details (architecture, data model, engines, API, security, limitations) are in the **[Technical Reference Document](docs/TRD.md)**.
 
@@ -180,14 +180,14 @@ Commit all three files in `backend/app/model/`. The API serves `trees.json`, and
 ## Tests
 
 ```bash
-cd backend && pip install -r requirements-dev.txt && python -m pytest   # 173 tests
+cd backend && pip install -r requirements-dev.txt && python -m pytest   # 186 tests
 cd frontend && npm test                                                  # 11 tests: OCR parser, batch mapping
 ```
 
 - **Original checker:** model info, the 10 sample transactions score as labelled, validation errors, every received-money rule.
 - **Predictor parity:** the pure-Python model matches LightGBM's probabilities (to 1e-12) and SHAP values (to 1e-9) on 320 rows.
 - **Engines:** every history pattern and its near-misses, unified-risk properties (never below the strongest signal, model-only results unchanged, no double counting), scanners for 11 message scam types, 10 URL verdicts, QR tricks and UPI IDs, secret masking.
-- **Platform:** sign-up and sessions, login throttling, another user gets 404 on every record, CSV import, cases and incident reports, aggregate-only community reports, all 9 simulator scenarios, graph cycles, settings, export and deletion, security headers, CSP parity with `vercel.json`, no PIN / OTP fields anywhere in the API.
+- **Platform:** sign-up and sessions, login throttling, another user gets 404 on every record, CSV import, cases and incident reports, aggregate-only community reports, all 9 simulator scenarios, statement upload (bank Excel with account details above the table, debit / credit columns, signed amounts, HTML ".xls", duplicates, zip-bomb and size limits), graph cycles, settings, export and deletion, security headers, CSP parity with `vercel.json`, no PIN / OTP fields anywhere in the API.
 - **AI investigator:** with fake Anthropic and OpenAI-style clients: provider selection and missing-setting messages, the tool loop for all four providers, Gemini schema conversion, consent, user-scoped tools, citation checking, error mapping, daily limit.
 - **OCR parser:** receipts for each app with typical OCR noise (made-up names and numbers).
 
@@ -355,7 +355,7 @@ backend/
   app/predictor.py                   pure-Python tree inference + TreeSHAP (no lightgbm at runtime)
   app/received.py                    rule-based check for money received
   app/model/                         trees.json (served), fraud_model.txt (LightGBM), meta.json
-  tests/                             173 tests: API, engines, scanners, platform, AI, predictor parity
+  tests/                             186 tests: API, engines, scanners, platform, AI, predictor parity
 
 frontend/
   vite.config.js                     dev server, proxies /api to the backend

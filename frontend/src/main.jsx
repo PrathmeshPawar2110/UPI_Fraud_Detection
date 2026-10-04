@@ -19,6 +19,7 @@ import Reports from "./pages/Reports.jsx";
 import Scan from "./pages/Scan.jsx";
 import Settings from "./pages/Settings.jsx";
 import Simulator from "./pages/Simulator.jsx";
+import Statement from "./pages/Statement.jsx";
 import Transactions from "./pages/Transactions.jsx";
 import "./styles.css";
 import "./platform.css";
@@ -42,6 +43,7 @@ createRoot(document.getElementById("root")).render(
             <Route path="check/detailed" element={<Check />} />
             <Route path="before-you-pay" element={<Scan />} />
             <Route path="help" element={<Help />} />
+            <Route path="statement" element={<Statement />} />
             <Route path="more" element={<More />} />
             <Route path="login" element={<Login />} />
             <Route path="scan" element={<Moved to="/before-you-pay" />} />

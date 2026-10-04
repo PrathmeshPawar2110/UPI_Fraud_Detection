@@ -6,6 +6,7 @@ import { useAuth } from "../lib/auth.jsx";
 const TASKS = [
   { to: "/check", icon: "₹", title: "A customer paid me", text: "Check a payment screenshot a customer shows you, before you hand over goods." },
   { to: "/before-you-pay", icon: "⌕", title: "Check before you pay", text: "Scan a QR code, or check a UPI ID, link or message someone sent you." },
+  { to: "/statement", icon: "≡", title: "Scan my statement", text: "Upload your bank or UPI statement (Excel or CSV) and check every payment in it." },
   { to: "/help", icon: "!", title: "Lost money? Get help", text: "What to do right now, and who to call.", danger: true },
 ];
 

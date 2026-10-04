@@ -570,3 +570,7 @@ form > .big-btn.primary-btn { width: 100%; margin-top: 8px; }
 .tx-risk { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .list-head + .lede { margin-bottom: 18px; }
 .guided form .big-btn { margin-top: 10px; }
+/* statement upload */
+.list-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+@media (min-width: 761px) { .task-grid { grid-template-columns: repeat(2, 1fr); } }
+.file-btn.busy { cursor: wait; opacity: .7; }
