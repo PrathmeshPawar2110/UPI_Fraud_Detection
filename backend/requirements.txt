@@ -2,6 +2,6 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 python-dotenv>=1.0     # loads backend/.env in local development
 sqlalchemy>=2.0
-psycopg[binary]>=3.2
+pg8000>=1.31
 anthropic>=0.40        # AI investigator: Anthropic
 openai>=1.50           # AI investigator: OpenAI, Azure OpenAI, Gemini

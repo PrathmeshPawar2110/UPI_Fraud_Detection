@@ -3,6 +3,6 @@
 # Local backend: backend/requirements.txt.  Tests: backend/requirements-dev.txt.  Training: requirements-train.txt.
 fastapi>=0.115
 sqlalchemy>=2.0          # database (Postgres in production, SQLite locally)
-psycopg[binary]>=3.2     # Postgres driver
+pg8000>=1.31            # Postgres driver (pure Python)
 anthropic>=0.40          # AI investigator: Anthropic provider
 openai>=1.50             # AI investigator: OpenAI, Azure OpenAI and Gemini (OpenAI-compatible) providers

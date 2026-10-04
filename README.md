@@ -340,7 +340,7 @@ api/index.py                         Vercel serverless entry point (imports back
 .github/workflows/ci-cd.yml          tests, then deploy to Vercel
 
 backend/
-  requirements.txt                   local API dependencies (FastAPI, uvicorn, SQLAlchemy, psycopg, anthropic)
+  requirements.txt                   local API dependencies (FastAPI, uvicorn, SQLAlchemy, pg8000, anthropic, openai)
   requirements-dev.txt               + pytest, httpx, lightgbm for the tests
   app/main.py                        FastAPI app: original endpoints, routers, security headers, SPA fallback
   app/config.py, db.py, models.py    settings, database, tables

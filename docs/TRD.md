@@ -204,7 +204,7 @@ No UI framework, CSS framework or state library is used: plain React state and c
 | Uvicorn (`[standard]`) | 0.54.0 (`>=0.30`) | ASGI server for local runs, auto-reload in development |
 | `predictor.py` (own code) | | Pure-Python tree inference and TreeSHAP for the exported model; no LightGBM, NumPy or SciPy at runtime |
 | SQLAlchemy | 2.1.3 (`>=2.0`) | ORM and database engine (Postgres in production, SQLite locally) |
-| psycopg (binary) | 3.3.6 (`>=3.2`) | Postgres driver |
+| pg8000 | 1.31.5 (`>=1.31`) | Postgres driver, pure Python (no compiled DLL for Windows Application Control to block). libpq-style URL options such as `sslmode` and `channel_binding` are translated in `db.py` |
 | anthropic | 1.11.0 (`>=0.40`) | AI investigator: Anthropic provider |
 | openai | 3.24.0 (`>=1.50`) | AI investigator: OpenAI, Azure OpenAI (`AzureOpenAI` client) and Gemini (OpenAI-compatible endpoint) |
 | python-dotenv | (`>=1.0`, local only) | Loads `backend/.env` in development |
@@ -256,7 +256,7 @@ UPI_Fraud_Detection/
 │   └── index.py                  Vercel serverless entry point (imports backend/app)
 │
 ├── backend/
-│   ├── requirements.txt          local API dependencies (FastAPI, uvicorn, SQLAlchemy, psycopg, anthropic)
+│   ├── requirements.txt          local API dependencies (FastAPI, uvicorn, SQLAlchemy, pg8000, anthropic, openai)
 │   ├── requirements-dev.txt      + pytest, httpx, lightgbm, numpy for tests
 │   ├── pytest.ini                test paths
 │   ├── app/
@@ -830,10 +830,11 @@ Production is detected from `VERCEL_ENV=production` (or `APP_ENV=production`); m
 | Part | How |
 |---|---|
 | Frontend | `installCommand: npm --prefix frontend ci`, `buildCommand: npm --prefix frontend run build`, `outputDirectory: frontend/dist` (static files on Vercel's CDN) |
-| API | `api/index.py` is a Python serverless function. It adds `backend/` to `sys.path` and exposes `app.main.app` (ASGI). `includeFiles: backend/app/**` ships the code, `trees.json` and `meta.json`; `fraud_model.txt` is excluded. Dependencies come from the root `requirements.txt` (FastAPI, SQLAlchemy, psycopg, anthropic). `maxDuration: 60` s, for AI questions |
+| API | `api/index.py` is a Python serverless function. It adds `backend/` to `sys.path` and exposes `app.main.app` (ASGI). `includeFiles: backend/app/**` ships the code, `trees.json` and `meta.json`; `fraud_model.txt` is excluded. Dependencies come from the root `requirements.txt` (FastAPI, SQLAlchemy, pg8000, anthropic, openai). `maxDuration: 60` s, for AI questions |
 | Routing | Rewrite `/api/(.*)` → `/api/index` (FastAPI still sees the original path, such as `/api/predict`), then every other path → `/index.html` so client-side routes work on reload. Static files are served first |
 | Headers | Security headers and CSP for every path ([§12](#12-privacy-and-security)) |
-| Database | Postgres from any provider (e.g. Neon or Vercel Postgres) via `DATABASE_URL`. Tables are created on start-up if missing; connections aren't pooled across invocations (`NullPool`) |
+| Database | Postgres from any provider (e.g. Neon or Vercel Postgres) via `DATABASE_URL`. Tables are created on start-up if missing; connections aren't pooled across invocations (`NullPool`). Tables are always schema-qualified (`public.…`), because a transaction-mode pooler shares server connections between clients and a session `search_path` set by another client must not redirect queries |
+| Region | `regions: ["sin1"]` runs the function in Singapore, next to the Neon database (`ap-southeast-1`). Each query is a network round trip, so the function and database must be in the same region; change both together |
 | Git integration | `git.deploymentEnabled: false`: Vercel doesn't auto-deploy on push; GitHub Actions does, after the tests pass |
 
 **Pipeline** ([.github/workflows/ci-cd.yml](../.github/workflows/ci-cd.yml)), triggered by a push or pull request to `main`, or by hand:
@@ -891,7 +892,7 @@ cd frontend && npm test                                                  # 8 tes
 | Data filter | Profiled the dropped rows: 2,488,650 rows, 45 frauds, legit balances never add up |
 | OCR on real receipts | Tesseract.js with the app's settings on four real receipts (one per app), every field correct |
 | Full app | Headless Edge via the Chrome DevTools Protocol: upload each receipt into the real file input, wait for OCR, read the form, answer questions or enter a balance, submit, and screenshot in light, dark and 390 px mobile |
-| Deployment size | Linux packages measured: with LightGBM ~190 MB unpacked; runtime-only (FastAPI, SQLAlchemy, psycopg, anthropic) ~56 MB |
+| Deployment size | Linux packages measured: with LightGBM ~190 MB unpacked; runtime-only (FastAPI, SQLAlchemy, a Postgres driver, anthropic) ~56 MB |
 | Platform UI | Headless Edge against the production build on a throwaway database: sign up through the form, load demo data, open the highest-risk investigation, open a case and its report, network graph, simulator, alerts with the live stream, scanners, learn, emergency, settings, model and reports, in light, dark and 390 px mobile. Recorded zero JavaScript errors, zero failed API calls and no horizontal overflow |
 | CSP | Real GPay receipt uploaded under the CSP: OCR completed and filled the form with no policy violations |
 

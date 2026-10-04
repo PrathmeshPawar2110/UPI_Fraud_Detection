@@ -48,9 +48,7 @@ def load_demo(user: User = Depends(current_user), db: Session = Depends(get_db))
     """Add the synthetic demo dataset to the user's history (clearly flagged, removable)."""
     db.execute(delete(Transaction).where(Transaction.user_id == user.id, Transaction.source == "demo"))
     rows = [_to_row(user, t, "demo") for t in SIM.demo_dataset(datetime.now())]
-    db.add_all(rows)
-    db.flush()
-    S.rescore_all(db, user)
+    S.rescore_all(db, user, new=rows)  # scored before insert: one batched INSERT, no per-row UPDATEs
     for t in rows:
         if t.risk_level == "high":
             S.make_alerts(db, user, t)

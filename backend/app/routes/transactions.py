@@ -49,10 +49,14 @@ class NoteOut(BaseModel):
     created_at: datetime
 
 
-def _save(db: Session, user: User, body: TransactionIn, synthetic: bool = False) -> Transaction:
+def _build(user: User, body: TransactionIn, synthetic: bool = False) -> Transaction:
     data = body.model_dump()
     answers = data.pop("received_answers")
-    tx = Transaction(user_id=user.id, **data, received_answers=answers, is_synthetic=synthetic)
+    return Transaction(user_id=user.id, **data, received_answers=answers, is_synthetic=synthetic)
+
+
+def _save(db: Session, user: User, body: TransactionIn, synthetic: bool = False) -> Transaction:
+    tx = _build(user, body, synthetic)
     db.add(tx)
     db.flush()
     return tx
@@ -75,8 +79,8 @@ def import_csv(body: ImportBody, user: User = Depends(current_user), db: Session
         raise HTTPException(status_code=400, detail=str(e))
     if not rows:
         raise HTTPException(status_code=400, detail=errors[0]["error"] if errors else "No rows to import.")
-    new = [_save(db, user, r) for r in rows]
-    S.rescore_all(db, user)
+    new = [_build(user, r) for r in rows]
+    S.rescore_all(db, user, new=new)  # scored before insert: one batched INSERT, no per-row UPDATEs
     for tx in new:
         if tx.risk_level == "high":
             S.make_alerts(db, user, tx)

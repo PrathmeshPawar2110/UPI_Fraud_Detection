@@ -39,7 +39,8 @@ if not DATABASE_URL:
 if DATABASE_URL.startswith("postgres://"):  # Heroku/Neon style -> SQLAlchemy dialect name
     DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
 if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL[len("postgresql://"):]
+    # pg8000 is pure Python: no compiled DLL for Windows Application Control to block, smaller deploys.
+    DATABASE_URL = "postgresql+pg8000://" + DATABASE_URL[len("postgresql://"):]
 
 # Signs session cookies. Must be set (and kept secret) wherever data persists across restarts.
 SECRET_KEY = _env("SECRET_KEY")
