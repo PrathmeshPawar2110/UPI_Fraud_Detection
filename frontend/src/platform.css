@@ -574,3 +574,11 @@ form > .big-btn.primary-btn { width: 100%; margin-top: 8px; }
 .list-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 @media (min-width: 761px) { .task-grid { grid-template-columns: repeat(2, 1fr); } }
 .file-btn.busy { cursor: wait; opacity: .7; }
+
+/* My payments: fraud and dangerous payments stand out in red, "be careful" in amber */
+.tx-row.fraud, .tx-row.danger { background: var(--high-soft); box-shadow: inset 4px 0 0 var(--high); }
+.tx-row.fraud .tx-amount, .tx-row.danger .tx-amount, .tx-row.fraud .tx-party, .tx-row.danger .tx-party { color: var(--high); }
+.tx-row.fraud .tx-link:hover, .tx-row.danger .tx-link:hover { background: transparent; filter: brightness(0.97); }
+.tx-row.careful { box-shadow: inset 4px 0 0 var(--med); }
+.tx-row.fraud .tx-link, .tx-row.danger .tx-link, .tx-row.careful .tx-link { padding-left: 14px; }
+.tx-row.fraud .review-chip { border-color: var(--high); color: var(--high); }

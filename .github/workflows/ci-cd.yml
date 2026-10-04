@@ -54,6 +54,7 @@ jobs:
           buf = io.BytesIO(); wb.save(buf)
           rows, errors = parse_file("s.xlsx", buf.getvalue(), 10)
           assert len(rows) == 1 and rows[0].direction == "sent" and not errors, (rows, errors)
+          import pdfminer.high_level, cryptography  # statement upload: PDF reader (and locked PDFs)
           print("ok:", res["risk"], round(res["probability"], 4), len(app.openapi()["paths"]), "API paths")
           EOF
 

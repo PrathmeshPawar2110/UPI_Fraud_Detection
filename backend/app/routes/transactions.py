@@ -126,17 +126,25 @@ def import_csv(body: ImportBody, user: User = Depends(current_user), db: Session
 @router.post("/transactions/import-file", response_model=ImportResult)
 async def import_file(request: Request, name: str = Query(default="", max_length=255),
                       user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """Upload a statement as-is (CSV, TSV, .xlsx, .xls, or a bank's HTML ".xls"); the raw bytes are the body."""
+    """Upload a statement as-is (CSV, TSV, .xlsx, .xls, a bank's HTML ".xls", or PDF); the raw bytes are the body.
+    A locked PDF's password comes URL-encoded in the X-File-Password header (headers aren't logged like URLs);
+    it's only used to open the file. A locked PDF without the right password gets 423."""
+    from urllib.parse import unquote
+    from ..engine.pdf_statement import PdfPasswordError
+    password = unquote(request.headers.get("x-file-password", ""))[:128] or None
     data = await request.body()
     if not data:
         raise HTTPException(status_code=400, detail="The file is empty.")
     if len(data) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="That file is too large (max 4 MB).")
     try:
-        rows, errors = csv_import.parse_file(name, data, config.MAX_IMPORT_ROWS)
+        rows, errors = csv_import.parse_file(name, data, config.MAX_IMPORT_ROWS, password)
+    except PdfPasswordError as e:
+        raise HTTPException(status_code=423, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return _import(db, user, rows, errors, "xlsx" if data[:2] == b"PK" else "file")
+    kind = "pdf" if data.lstrip()[:5] == b"%PDF-" else "xlsx" if data[:2] == b"PK" else "file"
+    return _import(db, user, rows, errors, kind)
 
 
 MAX_BATCH = 50

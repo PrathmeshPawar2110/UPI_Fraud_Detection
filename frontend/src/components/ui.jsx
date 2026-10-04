@@ -63,10 +63,22 @@ export function Empty({ title, children, action }) {
   );
 }
 
+const MARKED = { legitimate: "Marked OK", suspicious: "Marked suspicious", confirmed_fraud: "Marked fraud" };
+
+/** Row tone: your own "it was fraud" mark wins over the engine; "this is fine" quiets a warning. */
+export function rowTone(t) {
+  if (t.review_status === "confirmed_fraud") return "fraud";
+  if (t.review_status === "legitimate") return "";
+  if (t.risk_level === "high") return "danger";
+  if (t.risk_level === "medium" || t.review_status === "suspicious") return "careful";
+  return "";
+}
+
 export function TxRow({ t, compact }) {
   const arrow = t.direction === "received" ? "←" : "→";
+  const tone = rowTone(t);
   return (
-    <li className={"tx-row" + (compact ? " compact" : "")}>
+    <li className={"tx-row" + (compact ? " compact" : "") + (tone ? " " + tone : "")}>
       <Link to={`/investigate/${t.id}`} className="tx-link">
         <span className={"tx-amount " + t.direction}>{t.direction === "received" ? "+" : "−"}{inr(t.amount)}</span>
         <span className="tx-party">
@@ -77,10 +89,11 @@ export function TxRow({ t, compact }) {
         <span className="tx-when">{when(t.occurred_at)}</span>
         <span className="tx-risk">
           <span title={t.risk_score != null ? `Risk score ${Math.round(t.risk_score * 100)} / 100` : undefined}>
-            <Level level={t.risk_level}>{PLAIN_LEVEL[t.risk_level] || "Not checked"}</Level>
+            {tone === "fraud" ? <Level level="high">Fraud</Level>
+              : <Level level={t.risk_level}>{PLAIN_LEVEL[t.risk_level] || "Not checked"}</Level>}
           </span>
           {t.is_synthetic && <Synthetic small />}
-          {t.review_status !== "unreviewed" && <span className="review-chip">{t.review_status.replace("_", " ")}</span>}
+          {MARKED[t.review_status] && <span className="review-chip">{MARKED[t.review_status]}</span>}
         </span>
       </Link>
     </li>

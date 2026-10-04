@@ -1,4 +1,4 @@
-"""Transaction history import: CSV, Excel (.xlsx / .xls) and bank-statement layouts.
+"""Transaction history import: CSV, Excel (.xlsx / .xls), PDF (pdf_statement.py) and bank-statement layouts.
 
 Needs a date and an amount, plus a way to tell money out from money in: a direction column
 ("type", "dr/cr"…), separate debit / credit (withdrawal / deposit) columns, or a signed amount
@@ -61,12 +61,16 @@ DATE_FORMATS = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-
                 "%d/%m/%y %H:%M", "%d/%m/%y", "%d-%m-%y", "%d.%m.%Y", "%d.%m.%y",
                 "%d %b %Y %H:%M", "%d %b %Y %H:%M:%S", "%d %b %Y, %I:%M %p", "%d %b %Y %I:%M %p", "%d %b %Y",
                 "%d %b %y", "%d-%b-%Y", "%d-%b-%y", "%d-%b-%Y %H:%M", "%d %B %Y", "%d %B %Y %I:%M %p",
-                "%b %d, %Y", "%b %d, %Y %I:%M %p", "%B %d, %Y"]
+                "%b %d, %Y", "%b %d, %Y %I:%M %p", "%b %d, %Y %H:%M", "%B %d, %Y",
+                "%d %b, %Y", "%d %b, %Y %I:%M %p", "%d %b, %Y %H:%M", "%d %b %Y, %H:%M", "%d %b %Y, %I:%M:%S %p"]
 TIME_FORMATS = ["%H:%M:%S", "%H:%M", "%I:%M %p", "%I:%M:%S %p", "%I:%M%p"]
 HEADER_SCAN = 40
 MAX_UNZIPPED = 60_000_000
 VPA = re.compile(r"(?<![\w.@])([a-z0-9][a-z0-9._]{1,255}@[a-z][a-z0-9]{1,63})(?![\w@]|\.[a-z])", re.I)  # not emails
 UPI_REF = re.compile(r"(?<!\d)(\d{12})(?!\d)")
+# Wallet PDFs put the reference lines under the name in the same cell: "Paid to JIO Postpaid Transaction ID T24… UTR No. 4123…"
+NAME_TAIL = re.compile(r"\s+(upi\s+)?(transaction\s+id|txn\s+id|utr\b|upi\s+ref|ref(erence)?\s+no|order\s+id|paid\s+by|"
+                       r"debited\s+from|credited\s+to|bank\s+ref).*$", re.I | re.S)
 PARTY_PREFIX = re.compile(r"^(paid to|sent to|money sent to|transfer to|received from|money received from|"
                           r"payment from|payment to)\s+", re.I)
 
@@ -242,8 +246,13 @@ def text_rows(text: str, limit: int) -> list[list[str]]:
     return rows
 
 
-def read_file(name: str, data: bytes, max_rows: int) -> list[list[str]]:
+def read_file(name: str, data: bytes, max_rows: int, password: str | None = None) -> list[list[str]]:
     limit = max_rows + HEADER_SCAN + 1
+    if data.lstrip()[:5] == b"%PDF-":
+        from .pdf_statement import pdf_rows
+        return pdf_rows(data, password, limit)
+    if (name or "").lower().endswith(".pdf"):
+        raise ValueError("This doesn't look like a real PDF file.")
     if data[:4] == b"PK\x03\x04":  # .xlsx is a zip
         return _xlsx_rows(data, limit)
     if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":  # legacy .xls (OLE2)
@@ -257,18 +266,27 @@ def read_file(name: str, data: bytes, max_rows: int) -> list[list[str]]:
 
 # ---------- turning rows into transactions ----------
 
+def map_header(row) -> dict[str, int]:
+    """Which field each column holds, from the column names."""
+    names = [_norm(h) for h in row]
+    cols = {}
+    for field, aliases in ALIASES.items():
+        for alias in aliases:  # alias order wins over column order ("date" before "value date")
+            if alias in names and names.index(alias) not in cols.values():
+                cols[field] = names.index(alias)
+                break
+    return cols
+
+
+def is_header(cols: dict) -> bool:
+    return "occurred_at" in cols and bool({"amount", "debit", "credit"} & cols.keys())
+
+
 def _find_header(rows: list[list[str]]) -> tuple[int, dict[str, int]]:
     best = None
     for i, row in enumerate(rows[:HEADER_SCAN]):
-        names = [_norm(h) for h in row]
-        cols = {}
-        for field, aliases in ALIASES.items():
-            for alias in aliases:  # alias order wins over column order ("date" before "value date")
-                if alias in names and names.index(alias) not in cols.values():
-                    cols[field] = names.index(alias)
-                    break
-        has_amount = "amount" in cols or "debit" in cols or "credit" in cols
-        if "occurred_at" in cols and has_amount:
+        cols = map_header(row)
+        if is_header(cols):
             return i, cols
         if best is None and len(cols) >= 2:
             best = (i, cols)
@@ -344,7 +362,7 @@ def _row(get) -> dict:
     for f in ("payment_app", "external_id", "category", "device_id", "location"):
         if get(f):
             data[f] = get(f)
-    name = PARTY_PREFIX.sub("", get("counterparty_name"))
+    name = NAME_TAIL.sub("", PARTY_PREFIX.sub("", get("counterparty_name"))).strip(" :-")
     upi = get("counterparty_upi") or (m.group(1) if (m := VPA.search(text)) else "")
     if upi:
         data["counterparty_upi"] = upi.lower()
@@ -371,5 +389,5 @@ def parse(text: str, max_rows: int) -> tuple[list[TransactionIn], list[dict]]:
     return parse_rows(text_rows(text, max_rows + HEADER_SCAN + 1), max_rows)
 
 
-def parse_file(name: str, data: bytes, max_rows: int) -> tuple[list[TransactionIn], list[dict]]:
-    return parse_rows(read_file(name, data, max_rows), max_rows)
+def parse_file(name: str, data: bytes, max_rows: int, password: str | None = None) -> tuple[list[TransactionIn], list[dict]]:
+    return parse_rows(read_file(name, data, max_rows, password), max_rows)

@@ -9,3 +9,4 @@ openai>=1.50             # AI investigator: OpenAI, Azure OpenAI and Gemini (Ope
 openpyxl>=3.1           # statement upload: .xlsx
 xlrd>=2.0                # statement upload: legacy .xls
 defusedxml>=0.7          # openpyxl parses XML through it when installed
+pdfminer.six>=20250506  # statement upload: PDF (needs cryptography for locked PDFs)

@@ -45,8 +45,10 @@ export const logout = () => post("/api/auth/logout");
 export const createTransaction = (body) => post("/api/transactions", body);
 export const importCsv = (csv) => post("/api/transactions/import", { csv });
 // Statement upload (CSV / Excel): the file itself is the body, so nothing is base64-inflated.
-export const importFile = (file) => request(`/api/transactions/import-file?name=${encodeURIComponent(file.name)}`,
-  { method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" } });
+// A locked PDF's password goes in a header (not the URL, which servers log).
+export const importFile = (file, password) => request(`/api/transactions/import-file?name=${encodeURIComponent(file.name)}`,
+  { method: "POST", body: file, headers: { "Content-Type": "application/octet-stream",
+                                           ...(password ? { "X-File-Password": encodeURIComponent(password) } : {}) } });
 export const createTransactionsBatch = (items) => post("/api/transactions/batch", { items });
 export const listTransactions = (params) => get("/api/transactions", params);
 export const getTransaction = (id) => get(`/api/transactions/${id}`);

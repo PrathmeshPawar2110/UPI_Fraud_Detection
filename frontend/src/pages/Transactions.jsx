@@ -101,7 +101,7 @@ export default function Transactions() {
                    <Link className="big-btn primary-btn" to="/check">Check a payment</Link>
                    <Link className="big-btn ghost-btn" to="/statement">Upload a statement</Link>
                  </div>}>
-            Check a payment and tap "Save to My payments", or upload your bank statement (Excel or CSV) to check every payment in it.
+            Check a payment and tap "Save to My payments", or upload your bank or UPI statement (PDF, Excel or CSV) to check every payment in it.
           </Empty>
         )
       ) : (

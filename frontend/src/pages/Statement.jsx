@@ -6,7 +6,7 @@ import { importFile } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 
 const MAX_BYTES = 4_000_000;
-const ACCEPT = ".csv,.xlsx,.xls,.txt,.tsv,text/csv,text/plain,application/vnd.ms-excel," +
+const ACCEPT = ".pdf,.csv,.xlsx,.xls,.txt,.tsv,application/pdf,text/csv,text/plain,application/vnd.ms-excel," +
                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const EXAMPLE = "Date,Narration,Withdrawal Amt.,Deposit Amt.,Closing Balance\n" +
   "01/09/2026 10:05,UPI-CHAI POINT-chaipoint.ka@ybl-412345678901,240,,41760\n" +
@@ -15,9 +15,9 @@ const EXAMPLE = "Date,Narration,Withdrawal Amt.,Deposit Amt.,Closing Balance\n" 
   "03/09/2026 02:10,UPI-QUICK PAY-quickpay.mule01@axl-412345678903,102560,,0\n";
 
 const WHERE = [
-  ["Bank app or net banking", "Open Account statement, choose the dates, and download as Excel (.xls / .xlsx) or CSV."],
-  ["Paytm", "Balance & History → Download statement → Excel."],
-  ["PhonePe / Google Pay", "These only give PDF statements. Download the statement from your bank instead."],
+  ["Bank app or net banking", "Open Account statement, choose the dates, and download it as PDF, Excel or CSV."],
+  ["PhonePe, Google Pay, Paytm", "In the app's transaction history, look for \"Download statement\" (PDF)."],
+  ["Locked PDF?", "Bank statements often need a password, usually given in the bank's email (for example part of your name and date of birth). We'll ask for it."],
 ];
 
 export default function Statement() {
@@ -26,33 +26,40 @@ export default function Statement() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [locked, setLocked] = useState(false);   // the PDF needs a password
+  const [password, setPassword] = useState("");
 
-  async function scan(f) {
+  async function scan(f, pw) {
     setError(null);
     setResult(null);
-    if (/\.pdf$/i.test(f.name) || f.type === "application/pdf") {
-      return setError(new Error("PDF statements can't be read yet. Download the statement as Excel or CSV from your bank instead."));
-    }
     if (f.size > MAX_BYTES) return setError(new Error("That file is too large (max 4 MB). Choose fewer months and try again."));
     setFile(f);
     setBusy(true);
     try {
-      setResult(await importFile(f));
+      setResult(await importFile(f, pw));
+      setLocked(false);
+      setPassword("");
       window.dispatchEvent(new Event("upig:alerts"));
     } catch (err) {
-      setError(err);
+      if (err.status === 423) {
+        setLocked(true);
+        if (pw) setError(err);   // "Wrong password."
+      } else {
+        setLocked(false);
+        setError(err);
+      }
     } finally {
       setBusy(false);
     }
   }
 
-  const reset = () => { setFile(null); setResult(null); setError(null); };
+  const reset = () => { setFile(null); setResult(null); setError(null); setLocked(false); setPassword(""); };
 
   if (!user) {
     return (
       <div className="guided">
         <h1 className="guided-title">Scan my statement</h1>
-        <p className="lede">Upload your bank or UPI statement (Excel or CSV) and we'll check every payment in it for fraud.</p>
+        <p className="lede">Upload your bank or UPI statement (PDF, Excel or CSV) and we'll check every payment in it for fraud.</p>
         <p>You need a free account, so the payments can be saved and compared with each other.</p>
         <div className="result-actions">
           <Link className="big-btn primary-btn" to="/login?mode=signup&next=/statement">Create free account</Link>
@@ -79,7 +86,7 @@ export default function Statement() {
                      onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) scan(f); }} />
               {busy ? "Checking payments…" : "Choose statement file"}
             </label>
-            <p className="small-print">Excel (.xlsx, .xls) or CSV, up to 4 MB (about 2,000 payments).
+            <p className="small-print">PDF, Excel (.xlsx, .xls) or CSV, up to 4 MB (about 2,000 payments).
               Payments you've already saved are skipped, so it's safe to upload overlapping months.</p>
             {busy && file && <p className="small-print" role="status">Reading {file.name}…</p>}
             {!busy && (
@@ -88,12 +95,22 @@ export default function Statement() {
               </button>
             )}
           </div>
+          {locked && file && (
+            <form className="add-balance" onSubmit={(e) => { e.preventDefault(); scan(file, password); }}>
+              <label htmlFor="pdfpw">{file.name} is locked. Enter the PDF password</label>
+              <p className="small-print">It's usually in the email your bank sent with the statement. It's only used to open the file and is not saved.</p>
+              <div className="add-balance-row">
+                <input id="pdfpw" type="password" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} />
+                <button type="submit" className="big-btn primary-btn" disabled={!password || busy}>{busy ? "Opening…" : "Open"}</button>
+              </div>
+            </form>
+          )}
           <ErrorNote error={error} />
           <details className="more-details">
             <summary>Where do I get my statement?</summary>
             <ul className="do-list">{WHERE.map(([w, t]) => <li key={w}><b>{w}:</b> {t}</li>)}</ul>
-            <p className="small-print">We need a date and an amount for each payment, and either debit / credit columns
-              or a sent / received column. Other columns (narration, UPI ID, reference, balance) make the check better.</p>
+            <p className="small-print">We need a date and an amount for each payment, and either debit / credit columns,
+              a sent / received column, or "Paid to / Received from" wording. Photographed (scanned) PDFs can't be read. Other columns (narration, UPI ID, reference, balance) make the check better.</p>
           </details>
         </>
       )}

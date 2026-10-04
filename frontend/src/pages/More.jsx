@@ -4,7 +4,7 @@ import { useAuth } from "../lib/auth.jsx";
 // Advanced and occasional tools, kept out of the main navigation so everyday use stays simple.
 const TOOLS = [
   ["/check/detailed", "Detailed payment check", "Every field: balances, receiver balances, reference details.", false],
-  ["/statement", "Scan a statement", "Upload a bank or UPI statement (Excel or CSV) and check every payment.", true],
+  ["/statement", "Scan a statement", "Upload a bank or UPI statement (PDF, Excel or CSV) and check every payment.", true],
   ["/reports", "Report a scammer", "Warn other users about a UPI ID, phone number or link.", true],
   ["/cases", "Cases & reports", "Group suspicious payments and print a report for your bank or the police.", true],
   ["/alerts", "Alerts", "All warnings about your saved payments, and a live demo.", true],
